@@ -2,21 +2,14 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ArrowDown,
-  ArrowRight,
-  ArrowUp,
-  CheckCircle2,
   Clock,
-  Compass,
   ExternalLink,
   Loader2,
-  LocateFixed,
   Navigation,
-  Plus,
-  RefreshCw,
   Repeat,
-  ShieldAlert,
+  RotateCcw,
   Sparkles,
+  Train,
   X,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
@@ -41,41 +34,79 @@ import { RouteVisualizerMap } from './RouteVisualizerMap';
 const DEFAULT_BLOCKS: IntentStepBlock[] = [
   {
     id: 'blk-1',
-    label: '沒去過的博物館／展館',
+    label: '🏛️ 沒去過的展館',
     primary_category: 'museum_culture',
     sub_category: 'museum',
     only_unvisited: true,
   },
   {
     id: 'blk-2',
-    label: '餐廳：正餐',
+    label: '🍴 餐廳：正餐',
     primary_category: 'restaurant',
     sub_category: 'meal',
     only_unvisited: false,
   },
   {
     id: 'blk-3',
-    label: '餐廳：點心／下午茶',
+    label: '☕ 餐廳：點心',
     primary_category: 'restaurant',
     sub_category: 'snack_dessert',
     only_unvisited: false,
   },
   {
     id: 'blk-4',
-    label: '餐廳：伴手禮',
+    label: '🎁 餐廳：伴手禮',
     primary_category: 'restaurant',
     sub_category: 'souvenir',
     only_unvisited: false,
   },
 ];
 
+const QUICK_DIALOG_PRESETS = [
+  {
+    badge: '🚄 範例 1：10:30 到台南・16:30 搭高鐵（機車）',
+    text: '我 10:30 到台南，16:30 要坐高鐵回程，交通工具是機車，幫我安排順路行程',
+    destId: 'tainan-westcentral',
+    start: '10:30',
+    dep: '16:30',
+    mode: 'SCOOTER' as TravelMode,
+  },
+  {
+    badge: '🚆 範例 2：11:00 到台南・14:50 搭火車（緊湊自動濃縮）',
+    text: '今天 11:00 到台南，14:50 要搭火車離開，交通工具是機車',
+    destId: 'tainan-westcentral',
+    start: '11:00',
+    dep: '14:50',
+    mode: 'SCOOTER' as TravelMode,
+  },
+  {
+    badge: '🏨 範例 3：今晚住台南大飯店（最後一站回飯店旁）',
+    text: '今天 10:00 出發，晚上住在台南大飯店，幫我安排今天白天在台南的行程，交通工具是機車',
+    destId: 'tainan-westcentral',
+    start: '10:00',
+    dep: '',
+    mode: 'SCOOTER' as TravelMode,
+  },
+  {
+    badge: '🚶 範例 4：台南中西區・步行慢遊（近距離不鐵腿）',
+    text: '明天 10:30 要去台南旅遊，大概都是在中西區活動，交通工具是步行，所以安排近一點的地點。',
+    destId: 'tainan-westcentral',
+    start: '10:30',
+    dep: '',
+    mode: 'WALK' as TravelMode,
+  },
+  {
+    badge: '🦆 範例 5：高雄鹽埕區・指定中餐吃鴨肉珍',
+    text: '我明天 10:30 要去高雄，幫我安排鹽埕區之旅，不過指定中餐要在鴨肉珍吃',
+    destId: 'kaohsiung-yancheng',
+    start: '10:30',
+    dep: '',
+    mode: 'WALK' as TravelMode,
+  },
+];
+
 export function ItineraryPlannerView() {
-  const {
-    places,
-    categoryConfigs,
-    updatePlaceInline,
-    refreshPlacesHours,
-  } = usePlaces();
+  const { places, updatePlaceInline } = usePlaces();
 
   const [selectedPresetId, setSelectedPresetId] = useState(
     PRESET_DESTINATIONS[0].id
@@ -85,14 +116,13 @@ export function ItineraryPlannerView() {
     latitude: PRESET_DESTINATIONS[0].latitude,
     longitude: PRESET_DESTINATIONS[0].longitude,
   });
-  const [startTime, setStartTime] = useState('14:00');
-  const [travelMode, setTravelMode] = useState<TravelMode>('WALK');
-  const [radiusMeters, setRadiusMeters] = useState(5000);
-  const [intentBlocks, setIntentBlocks] =
-    useState<IntentStepBlock[]>(DEFAULT_BLOCKS);
+  const [startTime, setStartTime] = useState('10:30');
+  const [returnDepartureTime, setReturnDepartureTime] = useState('16:30');
+  const [travelMode, setTravelMode] = useState<TravelMode>('SCOOTER');
   const [intentText, setIntentText] = useState(
-    '我們現在在鹽埕區，想找沒去過的展覽館逛一下，晚餐吃附近收藏的正餐，接著吃個點心，最後順路買個伴手禮回飯店'
+    '我 10:30 到台南，16:30 要坐高鐵回程，交通工具是機車，幫我安排順路行程'
   );
+  const [sessionSkippedIds, setSessionSkippedIds] = useState<string[]>([]);
 
   const [plans, setPlans] = useState<ItineraryPlan[]>([]);
   const [activePlanIndex, setActivePlanIndex] = useState(0);
@@ -100,71 +130,129 @@ export function ItineraryPlannerView() {
   const [openSwapStopIndex, setOpenSwapStopIndex] = useState<number | null>(
     null
   );
-  const [gpsStatus, setGpsStatus] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const activePlan = plans[activePlanIndex] || null;
 
-  // Candidates within current radius for radar visualization
-  const nearbyCandidates = places.filter((p) => {
-    const dist = calculateDistanceMeters(
-      origin.latitude,
-      origin.longitude,
-      p.latitude,
-      p.longitude
-    );
-    return (
-      dist <= radiusMeters &&
-      p.visit_status !== 'visited_skip' &&
-      p.business_status !== 'CLOSED_PERMANENTLY'
-    );
-  });
-
   const handleGenerateItinerary = useCallback(
-    async (
-      overrideOrigin?: { name: string; latitude: number; longitude: number },
-      overrideText?: string,
-      overrideBlocks?: IntentStepBlock[]
-    ) => {
+    async (opts?: {
+      overrideOrigin?: { name: string; latitude: number; longitude: number };
+      overrideText?: string;
+      overrideMode?: TravelMode;
+      overrideStart?: string;
+      overrideDep?: string;
+      overrideSkipped?: string[];
+    }) => {
       setIsGenerating(true);
       setErrorMsg(null);
       setOpenSwapStopIndex(null);
 
-      const targetOrigin = overrideOrigin || origin;
+      const textToUse = opts?.overrideText ?? intentText;
+      let targetOrigin = opts?.overrideOrigin || origin;
+
+      // Auto-detect city from prompt text
+      if (!opts?.overrideOrigin) {
+        if (/高雄|鹽埕|駁二|鴨肉珍/.test(textToUse)) {
+          const kh = PRESET_DESTINATIONS.find((d) => d.city === '高雄市');
+          if (kh) {
+            targetOrigin = {
+              name: kh.label,
+              latitude: kh.latitude,
+              longitude: kh.longitude,
+            };
+            setSelectedPresetId(kh.id);
+            setOrigin(targetOrigin);
+          }
+        } else if (/台南|臺南|中西區|安平/.test(textToUse)) {
+          const tn = PRESET_DESTINATIONS.find((d) => d.city === '台南市');
+          if (tn) {
+            targetOrigin = {
+              name: tn.label,
+              latitude: tn.latitude,
+              longitude: tn.longitude,
+            };
+            setSelectedPresetId(tn.id);
+            setOrigin(targetOrigin);
+          }
+        } else if (/台北|大稻埕|迪化街/.test(textToUse)) {
+          const tp = PRESET_DESTINATIONS.find((d) => d.city === '台北市');
+          if (tp) {
+            targetOrigin = {
+              name: tp.label,
+              latitude: tp.latitude,
+              longitude: tp.longitude,
+            };
+            setSelectedPresetId(tp.id);
+            setOrigin(targetOrigin);
+          }
+        } else if (/東京|淺草|雷門/.test(textToUse)) {
+          const tyo = PRESET_DESTINATIONS.find((d) => d.city === '東京都');
+          if (tyo) {
+            targetOrigin = {
+              name: tyo.label,
+              latitude: tyo.latitude,
+              longitude: tyo.longitude,
+            };
+            setSelectedPresetId(tyo.id);
+            setOrigin(targetOrigin);
+          }
+        }
+      }
+
+      const modeToUse = opts?.overrideMode ?? travelMode;
+      const startToUse = opts?.overrideStart ?? startTime;
+      const depToUse =
+        opts?.overrideDep !== undefined
+          ? opts.overrideDep
+          : returnDepartureTime;
+      const skippedToUse = opts?.overrideSkipped ?? sessionSkippedIds;
+
+      const filteredPlaces = places.filter(
+        (p) => !skippedToUse.includes(p.id)
+      );
+
       try {
         const res = await fetch('/api/chain-itinerary', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            places,
+            places: filteredPlaces,
             origin: targetOrigin,
-            radiusMeters,
-            startTime,
-            travelMode,
-            intentText: overrideText ?? intentText,
-            intentBlocks: overrideBlocks ?? intentBlocks,
+            radiusMeters: modeToUse === 'WALK' ? 2200 : 9000,
+            startTime: startToUse,
+            returnDepartureTime: depToUse || undefined,
+            travelMode: modeToUse,
+            intentText: textToUse,
+            intentBlocks: DEFAULT_BLOCKS,
           }),
         });
         const data = await res.json();
         if (!res.ok || !data.plans || data.plans.length === 0) {
           throw new Error(
-            data.error || '找不到符合條件的串聯路線，請嘗試放寬搜尋半徑'
+            data.error || '找不到符合條件的順路行程，請調整條件後再試'
           );
         }
         setPlans(data.plans);
         setActivePlanIndex(0);
       } catch (err) {
         setErrorMsg(
-          err instanceof Error ? err.message : '行程串聯運算失敗'
+          err instanceof Error ? err.message : '行程運算失敗'
         );
       } finally {
         setIsGenerating(false);
       }
     },
-    [origin, places, radiusMeters, startTime, travelMode, intentText, intentBlocks]
+    [
+      intentText,
+      origin,
+      travelMode,
+      startTime,
+      returnDepartureTime,
+      sessionSkippedIds,
+      places,
+    ]
   );
 
-  // Auto-generate initial itinerary on first mount so user sees immediate rich timeline
   useEffect(() => {
     if (places.length > 0 && plans.length === 0) {
       handleGenerateItinerary();
@@ -172,10 +260,6 @@ export function ItineraryPlannerView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /**
-   * Recalculate arrival/departure times, travel durations, and Google Maps URL
-   * whenever user swaps a stop, reorders stops, or changes stay duration on the timeline!
-   */
   const recalculateActivePlanStops = (nextStopsRaw: ItineraryStop[]) => {
     if (!activePlan) return;
 
@@ -239,9 +323,6 @@ export function ItineraryPlannerView() {
     );
   };
 
-  /**
-   * 1-Tap Swap Stop on Timeline ("🔄 換一家同類型的店")
-   */
   const handleSwapStopWithAlternative = (
     stopIndex: number,
     replacementPlace: SavedPlace
@@ -250,7 +331,6 @@ export function ItineraryPlannerView() {
     const currentStop = activePlan.stops[stopIndex];
     const oldPlace = currentStop.place;
 
-    // Build updated alternatives list (include the old place so user can swap back!)
     const nextAlternatives = [
       {
         place: oldPlace,
@@ -269,7 +349,7 @@ export function ItineraryPlannerView() {
             ...st,
             place: replacementPlace,
             stay_mins: replacementPlace.estimated_stay_mins || st.stay_mins,
-            ai_reason: `已由您手動替換為同類別備選「${replacementPlace.name}」，系統已即時重算後續各站抵達時間與導航動線。`,
+            ai_reason: `🔀 已替換為順路同類型店家「${replacementPlace.name}」！`,
             alternatives: nextAlternatives,
           }
         : st
@@ -279,37 +359,29 @@ export function ItineraryPlannerView() {
     setOpenSwapStopIndex(null);
   };
 
-  /**
-   * Move stop up or down on the timeline
-   */
-  const handleMoveStop = (stopIndex: number, direction: -1 | 1) => {
+  const handleQuickRejectAndSwap = (stopIndex: number) => {
     if (!activePlan) return;
-    const targetIndex = stopIndex + direction;
-    if (targetIndex < 0 || targetIndex >= activePlan.stops.length) return;
-    const copy = [...activePlan.stops];
-    const [moved] = copy.splice(stopIndex, 1);
-    copy.splice(targetIndex, 0, moved);
-    recalculateActivePlanStops(copy);
+    const currentStop = activePlan.stops[stopIndex];
+    const rejectedId = currentStop.place.id;
+    const nextSkipped = [...sessionSkippedIds, rejectedId];
+    setSessionSkippedIds(nextSkipped);
+
+    if (currentStop.alternatives.length > 0) {
+      handleSwapStopWithAlternative(
+        stopIndex,
+        currentStop.alternatives[0].place
+      );
+    } else {
+      handleGenerateItinerary({ overrideSkipped: nextSkipped });
+    }
   };
 
-  /**
-   * Adjust stay duration on the timeline AND sync back to saved place
-   */
-  const handleAdjustStopStay = (stopIndex: number, deltaMins: number) => {
-    if (!activePlan) return;
-    const targetStop = activePlan.stops[stopIndex];
-    const nextStay = Math.max(15, Math.min(360, targetStop.stay_mins + deltaMins));
-    updatePlaceInline(targetStop.place.id, { estimated_stay_mins: nextStay });
-
-    const nextStops = activePlan.stops.map((st, idx) =>
-      idx === stopIndex ? { ...st, stay_mins: nextStay } : st
-    );
+  const handleRemoveStop = (stopIndex: number) => {
+    if (!activePlan || activePlan.stops.length <= 1) return;
+    const nextStops = activePlan.stops.filter((_, idx) => idx !== stopIndex);
     recalculateActivePlanStops(nextStops);
   };
 
-  /**
-   * 1-Tap Check-In on Timeline ("✅ 打卡完畢：去過想再去 / 去過不推")
-   */
   const handleTimelineCheckIn = (
     stopIndex: number,
     newStatus: VisitStatus
@@ -333,308 +405,182 @@ export function ItineraryPlannerView() {
     );
   };
 
-  const handleUseBrowserGps = () => {
-    if (!navigator.geolocation) {
-      setGpsStatus('您的瀏覽器不支援 GPS 定位，已使用預設座標');
-      return;
-    }
-    setGpsStatus('正在讀取手機 GPS 定位...');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const nextOrigin = {
-          name: `手機目前 GPS (${pos.coords.latitude.toFixed(
-            4
-          )}, ${pos.coords.longitude.toFixed(4)})`,
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-        };
-        setOrigin(nextOrigin);
-        setSelectedPresetId('custom-gps');
-        setGpsStatus('已更新為您目前的真實 GPS 座標！');
-        handleGenerateItinerary(nextOrigin);
-      },
-      () => {
-        setGpsStatus(
-          '無法取得 GPS 權限，您可以直接點選上方「高雄・鹽埕區 / 台北・大稻埕 / 東京・淺草」快速切換測試座標'
-        );
-      },
-      { timeout: 6000 }
-    );
-  };
-
   return (
     <div className="space-y-6">
-      {/* Step 1 & Step 2 Control Panel */}
-      <section className="rounded-2xl border border-stone-200 bg-white p-4 sm:p-5 shadow-2xs space-y-5">
-        {/* Destination / GPS Switcher */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-4 border-b border-stone-100">
-          <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-amber-700">
-              STEP 1｜當下出發情境設定
+      {/* ==================== 大字版 AI 排程對話窗 ==================== */}
+      <section className="rounded-3xl border-2 border-amber-400/80 bg-white p-5 sm:p-6 shadow-sm space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-xs">
+              <Sparkles className="h-6 w-6" />
             </span>
-            <h2 className="text-base sm:text-lg font-bold text-stone-900 mt-0.5">
-              您現在人在哪裡？準備怎麼移動？
-            </h2>
+            <div>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-stone-900">
+                🗣️ 直接用說的排行程（支援指定時間、交通工具、高鐵／火車／飯店）
+              </h2>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {PRESET_DESTINATIONS.map((dest) => (
-              <button
-                key={dest.id}
-                type="button"
-                onClick={() => {
-                  setSelectedPresetId(dest.id);
-                  const nextOrig = {
-                    name: dest.label,
-                    latitude: dest.latitude,
-                    longitude: dest.longitude,
-                  };
-                  setOrigin(nextOrig);
-                  const cityPrompt =
-                    dest.city === '台北市'
-                      ? '我們現在在大稻埕，想先逛個沒去過的美術館，接著吃正餐，喝個下午茶甜點，最後買伴手禮'
-                      : dest.city === '東京都'
-                      ? '現在在東京淺草雷門，想先去沒去過的文化展館，中午吃壽喜燒正餐，接著吃布丁點心，最後買銅鑼燒伴手禮'
-                      : '我們現在在鹽埕區，想找沒去過的展覽館逛一下，晚餐吃附近收藏的正餐，接著吃個點心，最後順路買個伴手禮回飯店';
-                  setIntentText(cityPrompt);
-                  handleGenerateItinerary(nextOrig, cityPrompt);
-                }}
-                className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
-                  selectedPresetId === dest.id
-                    ? 'bg-stone-900 text-white shadow-2xs'
-                    : 'border border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100'
-                }`}
-              >
-                📍 {dest.shortLabel}
-              </button>
-            ))}
-
+          {sessionSkippedIds.length > 0 && (
             <button
               type="button"
-              onClick={handleUseBrowserGps}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-900 hover:bg-teal-100 transition-colors cursor-pointer"
+              onClick={() => {
+                setSessionSkippedIds([]);
+                handleGenerateItinerary({ overrideSkipped: [] });
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-100 px-3.5 py-2 text-base font-bold text-stone-700 hover:bg-stone-200 cursor-pointer"
             >
-              <LocateFixed className="h-3.5 w-3.5 text-teal-700" />
-              讀取手機 GPS
+              <RotateCcw className="h-4 w-4" />
+              復原換掉的店 ({sessionSkippedIds.length})
             </button>
-          </div>
+          )}
         </div>
 
-        {gpsStatus && (
-          <div className="rounded-lg bg-teal-50 border border-teal-200 px-3 py-1.5 text-xs text-teal-900">
-            {gpsStatus}
-          </div>
-        )}
+        {/* 超大對話輸入框 */}
+        <div className="space-y-3">
+          <textarea
+            id="planner-large-dialog"
+            rows={3}
+            value={intentText}
+            onChange={(e) => setIntentText(e.target.value)}
+            placeholder="請直接輸入您的旅遊計畫，例如：&#10;「我明天 10:30 到台南，16:30 要坐高鐵回程，交通工具是機車，中餐想吃六千牛肉湯」"
+            className="w-full rounded-2xl border-2 border-stone-300 bg-stone-50/70 p-4 text-lg sm:text-xl font-bold text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:outline-none leading-relaxed"
+          />
 
-        {/* Departure Time, Travel Mode, Radius */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-            <label className="block text-xs font-semibold text-stone-600 mb-1">
-              🕒 預計出發時間（系統將檢查抵達時是否營業）
-            </label>
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-bold text-stone-900"
-            />
-          </div>
+          {/* 抵達時間、回程時間、交通工具 與 開始排程大按鈕 */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-stone-100/90 p-3.5 border border-stone-200">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-base font-extrabold text-stone-800">
+                <span>🛬 抵達：</span>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className="rounded-xl border-2 border-stone-300 bg-white px-3 py-1.5 text-base sm:text-lg font-extrabold text-stone-900"
+                />
+              </label>
 
-          <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-            <label className="block text-xs font-semibold text-stone-600 mb-1">
-              🚶 移動方式（計算點對點路網時間）
-            </label>
-            <div className="grid grid-cols-3 gap-1 rounded-lg bg-stone-200/70 p-1">
-              {(
-                [
-                  { mode: 'WALK', label: '🚶 步行' },
-                  { mode: 'TRANSIT', label: '🚇 大眾運輸' },
-                  { mode: 'DRIVE', label: '🚗 開車/騎車' },
-                ] as Array<{ mode: TravelMode; label: string }>
-              ).map((m) => (
-                <button
-                  key={m.mode}
-                  type="button"
-                  onClick={() => setTravelMode(m.mode)}
-                  className={`rounded-md py-1 text-xs font-semibold transition-all cursor-pointer ${
-                    travelMode === m.mode
-                      ? 'bg-stone-900 text-white shadow-2xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
+              <label className="flex items-center gap-2 text-base font-extrabold text-stone-800">
+                <span>🚄 回程搭車：</span>
+                <input
+                  type="time"
+                  value={returnDepartureTime}
+                  onChange={(e) => setReturnDepartureTime(e.target.value)}
+                  className="rounded-xl border-2 border-rose-300 bg-white px-3 py-1.5 text-base sm:text-lg font-extrabold text-rose-900"
+                />
+              </label>
 
-          <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-            <div className="flex items-center justify-between text-xs font-semibold text-stone-600 mb-1">
-              <span>📡 PostGIS 周邊搜尋半徑</span>
-              <span className="text-amber-700 font-bold">
-                {(radiusMeters / 1000).toFixed(1)} km（入圍 {nearbyCandidates.length}{' '}
-                點）
-              </span>
-            </div>
-            <input
-              type="range"
-              min={1500}
-              max={15000}
-              step={500}
-              value={radiusMeters}
-              onChange={(e) => setRadiusMeters(Number(e.target.value))}
-              className="w-full accent-amber-600 cursor-pointer mt-1.5"
-            />
-          </div>
-        </div>
-
-        {/* Step 2: Sequence Block Builder + Natural Language Intent */}
-        <div className="pt-2 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-700">
-                STEP 2｜積木式順序組裝器 ＋ 自然語言當下想法
-              </span>
-              <p className="text-xs text-stone-500">
-                點擊積木可切換「僅限沒去過🌟」或移除，也可從右側加入新站點；伴手禮會自動優先排在最後一站
-              </p>
-            </div>
-
-            {/* Quick Add Block Dropdown */}
-            <div className="flex items-center gap-1.5">
-              <select
-                aria-label="新增行程積木"
-                onChange={(e) => {
-                  const sub = e.target.value;
-                  if (!sub) return;
-                  const cfg = categoryConfigs.find((c) => c.sub_category === sub);
-                  if (cfg) {
-                    setIntentBlocks((prev) => [
-                      ...prev,
-                      {
-                        id: `blk-${Date.now()}`,
-                        label: `${cfg.primary_label.slice(0, 2)}：${cfg.sub_label}`,
-                        primary_category: cfg.primary_category,
-                        sub_category: cfg.sub_category,
-                        only_unvisited: false,
-                      },
-                    ]);
-                  }
-                  e.target.value = '';
-                }}
-                defaultValue=""
-                className="rounded-lg border border-stone-300 bg-stone-50 px-2.5 py-1.5 text-xs font-medium text-stone-700 cursor-pointer"
-              >
-                <option value="" disabled>
-                  ＋ 加入一站積木...
-                </option>
-                {categoryConfigs.map((cfg) => (
-                  <option key={cfg.id} value={cfg.sub_category}>
-                    ＋ {cfg.primary_label}：{cfg.sub_label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Interactive Sequence Blocks */}
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-stone-50 p-3">
-            {intentBlocks.map((blk, idx) => (
-              <React.Fragment key={blk.id}>
-                <div className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-2xs">
-                  <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-stone-900 text-[10px] text-white">
-                    {idx + 1}
-                  </span>
+              <div className="inline-flex rounded-xl border border-stone-300 bg-white p-1 gap-1">
+                {(
+                  [
+                    { mode: 'WALK', label: '🚶 步行' },
+                    { mode: 'SCOOTER', label: '🛵 機車' },
+                    { mode: 'DRIVE', label: '🚗 開車' },
+                  ] as Array<{ mode: TravelMode; label: string }>
+                ).map((m) => (
                   <button
+                    key={m.mode}
                     type="button"
-                    title="點擊切換：是否只選『沒去過』的店"
-                    onClick={() =>
-                      setIntentBlocks((prev) =>
-                        prev.map((b, i) =>
-                          i === idx
-                            ? { ...b, only_unvisited: !b.only_unvisited }
-                            : b
-                        )
-                      )
-                    }
-                    className={`rounded px-1.5 py-0.5 text-[11px] transition-colors cursor-pointer ${
-                      blk.only_unvisited
-                        ? 'bg-emerald-100 text-emerald-900 font-bold'
-                        : 'bg-stone-100 text-stone-600'
+                    onClick={() => {
+                      setTravelMode(m.mode);
+                      handleGenerateItinerary({ overrideMode: m.mode });
+                    }}
+                    className={`rounded-lg px-3.5 py-1.5 text-base font-extrabold transition-all cursor-pointer ${
+                      travelMode === m.mode
+                        ? 'bg-stone-900 text-white'
+                        : 'text-stone-600 hover:text-stone-900'
                     }`}
                   >
-                    {blk.only_unvisited ? '🌟 必選沒去過' : '不限狀態'}
+                    {m.label}
                   </button>
-                  <span>{blk.label}</span>
-                  {intentBlocks.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setIntentBlocks((prev) =>
-                          prev.filter((_, i) => i !== idx)
-                        )
-                      }
-                      className="text-stone-400 hover:text-red-600 cursor-pointer ml-1"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-                {idx < intentBlocks.length - 1 && (
-                  <ArrowRight className="h-4 w-4 text-stone-400 shrink-0" />
-                )}
-              </React.Fragment>
-            ))}
-          </div>
+                ))}
+              </div>
+            </div>
 
-          {/* Natural Language Input + Action Button */}
-          <div className="flex flex-col sm:flex-row gap-2.5">
-            <input
-              type="text"
-              value={intentText}
-              onChange={(e) => setIntentText(e.target.value)}
-              placeholder="輸入當下自然語言想法，例如：下午想先去一個沒去過的博物館，接著吃個點心，最後買伴手禮..."
-              className="flex-1 rounded-xl border border-stone-300 bg-stone-50/70 px-3.5 py-2.5 text-sm text-stone-900 focus:border-amber-600 focus:bg-white focus:outline-none"
-            />
             <button
               id="btn-generate-itinerary"
               type="button"
               disabled={isGenerating}
-              onClick={async () => {
-                await refreshPlacesHours(nearbyCandidates);
-                await handleGenerateItinerary();
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:opacity-50 transition-all cursor-pointer shrink-0 shadow-xs"
+              onClick={() => handleGenerateItinerary()}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-7 py-3.5 text-lg font-extrabold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50 transition-all cursor-pointer"
             >
               {isGenerating ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  檢查營業狀態與排程中...
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  正在安排順路行程...
                 </>
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4" />
-                  依想法串聯最佳動線
+                  <Sparkles className="h-5 w-5" />
+                  ✨ 立即安排順路行程
                 </>
               )}
             </button>
           </div>
         </div>
+
+        {/* 一鍵帶入範例（大字膠囊） */}
+        <div className="space-y-2">
+          <div className="text-sm sm:text-base font-extrabold text-stone-500">
+            💡 點擊下方範例可直接測試不同情境：
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {QUICK_DIALOG_PRESETS.map((preset, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  setIntentText(preset.text);
+                  setStartTime(preset.start);
+                  setReturnDepartureTime(preset.dep);
+                  setTravelMode(preset.mode);
+                  const foundDest = PRESET_DESTINATIONS.find(
+                    (d) => d.id === preset.destId
+                  );
+                  const nextOrig = foundDest
+                    ? {
+                        name: foundDest.label,
+                        latitude: foundDest.latitude,
+                        longitude: foundDest.longitude,
+                      }
+                    : origin;
+                  if (foundDest) {
+                    setSelectedPresetId(foundDest.id);
+                    setOrigin(nextOrig);
+                  }
+                  handleGenerateItinerary({
+                    overrideOrigin: nextOrig,
+                    overrideText: preset.text,
+                    overrideMode: preset.mode,
+                    overrideStart: preset.start,
+                    overrideDep: preset.dep,
+                  });
+                }}
+                className={`rounded-xl border px-3.5 py-2 text-sm sm:text-base font-bold transition-all cursor-pointer text-left ${
+                  intentText === preset.text
+                    ? 'border-amber-600 bg-amber-50 text-amber-950 font-extrabold'
+                    : 'border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100'
+                }`}
+              >
+                {preset.badge}
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       {errorMsg && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-2xl border-2 border-red-200 bg-red-50 p-4 text-base font-bold text-red-700">
           {errorMsg}
         </div>
       )}
 
-      {/* Results: Plan Switcher + Map + Interactive Timeline */}
+      {/* ==================== 排程結果：互動地圖 ＋ 大字時間軸 ==================== */}
       {activePlan && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Column: Timeline & Live Controls (7 cols) */}
-          <div className="lg:col-span-7 space-y-4">
-            {/* Plan Tabs (Plan A / Plan B) */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
+        <section className="space-y-5">
+          {/* 方案切換 ＋ 時刻狀態摘要 ＋ Google Maps 導航大按鈕 */}
+          <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 {plans.map((pl, idx) => (
                   <button
@@ -644,10 +590,10 @@ export function ItineraryPlannerView() {
                       setActivePlanIndex(idx);
                       setOpenSwapStopIndex(null);
                     }}
-                    className={`rounded-xl px-4 py-2 text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                    className={`rounded-xl px-4 py-2.5 text-base sm:text-lg font-extrabold transition-all cursor-pointer ${
                       activePlanIndex === idx
-                        ? 'bg-stone-900 text-white shadow-sm'
-                        : 'border border-stone-200 bg-white text-stone-600 hover:bg-stone-100'
+                        ? 'bg-stone-900 text-white shadow-xs'
+                        : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
                     }`}
                   >
                     {pl.title}
@@ -655,284 +601,220 @@ export function ItineraryPlannerView() {
                 ))}
               </div>
 
-              <span className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg font-medium">
-                ✓ 已即時檢查周邊 {activePlan.refreshed_candidates_count} 間店營業狀態
-              </span>
-            </div>
-
-            {/* Summary Header Card */}
-            <div className="rounded-2xl border border-stone-200 bg-white p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-              <div>
-                <h3 className="text-base font-bold text-stone-900">
-                  {activePlan.title}
-                </h3>
-                <p className="text-xs text-stone-500 mt-0.5">
-                  總時長約 {Math.floor(activePlan.total_duration_mins / 60)} 小時{' '}
-                  {activePlan.total_duration_mins % 60} 分（含總移動{' '}
-                  {activePlan.total_travel_mins} 分鐘／總路程{' '}
-                  {(activePlan.total_distance_meters / 1000).toFixed(2)} km）
-                </p>
-              </div>
               <a
-                id="btn-open-google-maps-nav"
                 href={activePlan.google_maps_nav_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-xs sm:text-sm font-bold text-white hover:bg-teal-800 transition-colors shrink-0 shadow-2xs"
+                className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-5 py-3 text-base sm:text-lg font-extrabold text-white shadow-xs hover:bg-teal-800 transition-colors"
               >
-                <Navigation className="h-4 w-4" />
-                一鍵開啟全路線導航
-                <ExternalLink className="h-3.5 w-3.5" />
+                <Navigation className="h-5 w-5" />
+                開啟 Google Maps 全程導航
+                <ExternalLink className="h-4 w-4" />
               </a>
             </div>
 
-            {/* Vertical Interactive Timeline */}
-            <div className="space-y-3 relative">
-              {activePlan.stops.map((stop, idx) => {
-                const isSwapOpen = openSwapStopIndex === idx;
-                return (
-                  <div
-                    key={`${stop.place.id}-${idx}`}
-                    className="rounded-2xl border border-stone-200 bg-white p-4 shadow-2xs transition-all"
-                  >
-                    {/* Travel Connector Banner from Previous Stop */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3 pb-2.5 border-b border-stone-100 text-xs text-stone-500">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-amber-600 text-white font-bold text-xs">
-                          {stop.stop_order}
-                        </span>
-                        <span className="font-bold text-stone-900 text-sm">
-                          {stop.arrival_time} – {stop.departure_time}
-                        </span>
-                        <span className="text-stone-400">｜</span>
-                        <span>
-                          距上一站 {stop.distance_meters_from_prev}m（約{' '}
-                          {stop.travel_mins_from_prev} 分鐘）
-                        </span>
-                      </div>
-
-                      {/* Reorder & Stay Duration Controls */}
-                      <div className="flex items-center gap-1">
-                        <div className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[11px]">
-                          <Clock className="h-3 w-3 text-stone-500" />
-                          <button
-                            type="button"
-                            onClick={() => handleAdjustStopStay(idx, -15)}
-                            className="font-bold px-1 hover:text-stone-900 cursor-pointer"
-                          >
-                            -
-                          </button>
-                          <span className="font-semibold text-stone-800">
-                            停留 {stop.stay_mins}分
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleAdjustStopStay(idx, 15)}
-                            className="font-bold px-1 hover:text-stone-900 cursor-pointer"
-                          >
-                            +
-                          </button>
-                        </div>
-
-                        <button
-                          type="button"
-                          disabled={idx === 0}
-                          onClick={() => handleMoveStop(idx, -1)}
-                          title="上移一站"
-                          className="rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-800 disabled:opacity-30 cursor-pointer"
-                        >
-                          <ArrowUp className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={idx === activePlan.stops.length - 1}
-                          onClick={() => handleMoveStop(idx, 1)}
-                          title="下移一站"
-                          className="rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-800 disabled:opacity-30 cursor-pointer"
-                        >
-                          <ArrowDown className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Main Stop Content */}
-                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-base font-bold text-stone-900">
-                            {stop.place.name}
-                          </h4>
-                          <span
-                            className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
-                              stop.is_open_at_arrival
-                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                : 'bg-red-50 text-red-700 border border-red-200'
-                            }`}
-                          >
-                            {stop.open_status_note}
-                          </span>
-                        </div>
-                        <p className="text-xs text-stone-500">
-                          {stop.place.formatted_address}
-                        </p>
-                        <p className="text-xs text-amber-900 bg-amber-50/70 rounded-lg px-2.5 py-1.5 mt-1.5">
-                          💡 <strong>AI 排程理由：</strong>
-                          {stop.ai_reason}
-                        </p>
-                        {stop.place.user_notes && (
-                          <p className="text-xs text-stone-600 pt-1">
-                            📝 收藏筆記：{stop.place.user_notes}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Live On-the-Go Action Bar: Check-In & 1-Tap Swap */}
-                    <div className="mt-3.5 pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2">
-                      {/* 1-Tap Check-In synced with Places Collection */}
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-stone-500 mr-1">
-                          現場打卡同步更新：
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleTimelineCheckIn(idx, 'visited_revisit')
-                          }
-                          className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
-                            stop.place.visit_status === 'visited_revisit'
-                              ? 'bg-amber-700 text-white shadow-2xs'
-                              : 'border border-stone-200 bg-stone-50 text-stone-700 hover:bg-amber-50'
-                          }`}
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          ❤️ 逛完・想再去
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleTimelineCheckIn(idx, 'visited_skip')
-                          }
-                          className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
-                            stop.place.visit_status === 'visited_skip'
-                              ? 'bg-stone-800 text-white shadow-2xs'
-                              : 'border border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-200/60'
-                          }`}
-                        >
-                          🚫 逛完・下次不推
-                        </button>
-                      </div>
-
-                      {/* 1-Tap Swap Same-Category Stop Button */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setOpenSwapStopIndex(isSwapOpen ? null : idx)
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50/70 px-3 py-1 text-xs font-semibold text-teal-900 hover:bg-teal-100 transition-colors cursor-pointer"
-                      >
-                        <Repeat className="h-3.5 w-3.5 text-teal-700" />
-                        換一家同類型的店 ({stop.alternatives.length} 間備選)
-                      </button>
-                    </div>
-
-                    {/* Expandable Same-Category Alternatives Drawer */}
-                    {isSwapOpen && (
-                      <div className="mt-3 rounded-xl border border-teal-200 bg-teal-50/40 p-3 space-y-2">
-                        <div className="flex items-center justify-between text-xs font-semibold text-teal-950">
-                          <span>
-                            🔄 選擇周邊同類型備選店家（點擊立即替換本站並重算時間軸）：
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setOpenSwapStopIndex(null)}
-                            className="text-stone-400 hover:text-stone-700 cursor-pointer"
-                          >
-                            關閉
-                          </button>
-                        </div>
-
-                        {stop.alternatives.length === 0 ? (
-                          <p className="text-xs text-stone-500">
-                            目前半徑內沒有其他同子分類的備選店家，您可調大搜尋半徑或至景點庫新增。
-                          </p>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {stop.alternatives.map((alt) => (
-                              <button
-                                key={alt.place.id}
-                                type="button"
-                                onClick={() =>
-                                  handleSwapStopWithAlternative(idx, alt.place)
-                                }
-                                className="flex flex-col justify-between text-left rounded-lg border border-teal-200/80 bg-white p-2.5 hover:border-teal-600 hover:shadow-xs transition-all cursor-pointer"
-                              >
-                                <div>
-                                  <div className="flex items-center justify-between gap-1">
-                                    <span className="font-bold text-xs text-stone-900">
-                                      {alt.place.name}
-                                    </span>
-                                    <span className="text-[11px] font-semibold text-teal-700">
-                                      換這家 ➔
-                                    </span>
-                                  </div>
-                                  <p className="text-[11px] text-stone-500 mt-0.5 line-clamp-1">
-                                    距上一站 {alt.distance_from_prev_meters}m（約{' '}
-                                    {alt.travel_mins_from_prev} 分）｜
-                                    {alt.open_status_note}
-                                  </p>
-                                </div>
-                                {alt.place.user_notes && (
-                                  <p className="text-[11px] text-stone-600 mt-1 line-clamp-1">
-                                    📝 {alt.place.user_notes}
-                                  </p>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Right Column: Spatial Route Visualizer Map + Excluded Closed/Skip Notice (5 cols) */}
-          <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-20">
-            <RouteVisualizerMap
-              origin={activePlan.origin}
-              candidates={nearbyCandidates}
-              activePlan={activePlan}
-            />
-
-            {/* Automatically Excluded Places Audit Box */}
-            {activePlan.excluded_closed_places.length > 0 && (
-              <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-2xs">
-                <div className="flex items-center gap-2 text-xs font-bold text-stone-800 mb-2">
-                  <ShieldAlert className="h-4 w-4 text-amber-600" />
-                  排程引擎已自動為您排除以下不適合店家：
-                </div>
-                <ul className="space-y-1.5 text-xs text-stone-600">
-                  {activePlan.excluded_closed_places.map((ex, i) => (
-                    <li
-                      key={`${ex.name}-${i}`}
-                      className="flex items-center justify-between rounded-lg bg-stone-50 px-2.5 py-1.5"
-                    >
-                      <span className="font-medium text-stone-800">
-                        {ex.name}
-                      </span>
-                      <span className="text-[11px] text-stone-500">
-                        {ex.reason}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+            {activePlan.time_fit_note && (
+              <div className="rounded-xl border-2 border-teal-300 bg-teal-50/80 px-4 py-3 text-base sm:text-lg font-extrabold text-teal-950 flex flex-wrap items-center justify-between gap-2">
+                <span>{activePlan.time_fit_note}</span>
+                {activePlan.must_arrive_by && (
+                  <span className="rounded-lg bg-rose-100 border border-rose-300 px-3 py-1 text-sm sm:text-base font-extrabold text-rose-900">
+                    🎯 最晚進站還車：{activePlan.must_arrive_by}
+                  </span>
+                )}
               </div>
             )}
           </div>
-        </div>
+
+          {/* 雙欄排版：左邊地圖、右邊大字時間軸 */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* 左欄：路線視覺化地圖 */}
+            <div className="lg:col-span-5 lg:sticky lg:top-36">
+              <RouteVisualizerMap
+                origin={activePlan.origin}
+                candidates={places.filter(
+                  (p) => p.city === PRESET_DESTINATIONS.find((d) => d.id === selectedPresetId)?.city
+                )}
+                activePlan={activePlan}
+              />
+            </div>
+
+            {/* 右欄：大字精簡時間軸 */}
+            <div className="lg:col-span-7 space-y-4">
+              {activePlan.stops.map((stop, idx) => (
+                <div
+                  key={`${stop.place.id}-${idx}`}
+                  className="rounded-2xl border-2 border-stone-200 bg-white p-5 shadow-xs space-y-4"
+                >
+                  {/* 第一排：第幾站 ＋ 時間 ＋ 店名 */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="rounded-xl bg-amber-600 px-3.5 py-1 text-base font-extrabold text-white">
+                        第 {stop.stop_order} 站・{stop.place.district}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-xl bg-stone-100 px-3 py-1 text-base sm:text-lg font-extrabold text-stone-900">
+                        <Clock className="h-4 w-4 text-amber-700" />
+                        {stop.arrival_time} – {stop.departure_time}
+                      </span>
+                    </div>
+
+                    <span className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-1 text-sm sm:text-base font-extrabold text-emerald-800">
+                      距離 {stop.distance_meters_from_prev}m（移動 {stop.travel_mins_from_prev} 分・停留 {stop.stay_mins} 分）
+                    </span>
+                  </div>
+
+                  {/* 第二排：超大店名 */}
+                  <div>
+                    <h3 className="text-xl sm:text-2xl font-extrabold text-stone-900">
+                      {stop.place.name}
+                    </h3>
+                    {stop.place.user_notes && (
+                      <p className="text-base text-stone-600 mt-1 font-medium">
+                        📝 {stop.place.user_notes}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 第三排：順路原因 */}
+                  <div className="rounded-xl bg-amber-50/70 border border-amber-200/80 px-4 py-2.5 text-base font-bold text-stone-800">
+                    {stop.ai_reason}
+                  </div>
+
+                  {/* 第四排：大按鈕操作列（秒換下一間 ／ 自選清單 ／ 打卡） */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-stone-100">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickRejectAndSwap(idx)}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-base font-extrabold text-white hover:bg-amber-700 transition-colors cursor-pointer"
+                      >
+                        🔀 不想去這家・秒換下一間
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOpenSwapStopIndex(
+                            openSwapStopIndex === idx ? null : idx
+                          )
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-xl border-2 border-teal-600 bg-teal-50 px-4 py-2 text-base font-extrabold text-teal-900 hover:bg-teal-100 transition-colors cursor-pointer"
+                      >
+                        <Repeat className="h-4 w-4" />
+                        自選清單 ({stop.alternatives.length})
+                      </button>
+
+                      {activePlan.stops.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveStop(idx)}
+                          className="inline-flex items-center gap-1 rounded-xl border border-stone-300 bg-stone-50 px-3.5 py-2 text-base font-bold text-stone-600 hover:bg-stone-100 cursor-pointer"
+                        >
+                          <X className="h-4 w-4" />
+                          略過
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="inline-flex rounded-xl bg-stone-100 p-1 gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleTimelineCheckIn(idx, 'visited_revisit')
+                        }
+                        className={`rounded-lg px-3 py-1.5 text-sm sm:text-base font-extrabold cursor-pointer ${
+                          stop.place.visit_status === 'visited_revisit'
+                            ? 'bg-amber-600 text-white'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        ❤️ 想再去
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleTimelineCheckIn(idx, 'visited_skip')
+                        }
+                        className={`rounded-lg px-3 py-1.5 text-sm sm:text-base font-extrabold cursor-pointer ${
+                          stop.place.visit_status === 'visited_skip'
+                            ? 'bg-stone-700 text-white'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        🚫 不推
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 展開的自選同類型備選清單 */}
+                  {openSwapStopIndex === idx && (
+                    <div className="rounded-xl border-2 border-teal-300 bg-teal-50/50 p-4 space-y-2.5">
+                      <div className="text-base font-extrabold text-teal-950">
+                        點選下方同類型店家即可立即替換：
+                      </div>
+                      {stop.alternatives.length === 0 ? (
+                        <div className="text-base text-stone-500">
+                          附近無其他同分類備選店家
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {stop.alternatives.map((alt) => (
+                            <button
+                              key={alt.place.id}
+                              type="button"
+                              onClick={() =>
+                                handleSwapStopWithAlternative(idx, alt.place)
+                              }
+                              className="w-full flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-left hover:border-teal-600 transition-colors cursor-pointer"
+                            >
+                              <div>
+                                <div className="text-lg font-extrabold text-stone-900">
+                                  {alt.place.name}
+                                </div>
+                                <div className="text-sm sm:text-base text-stone-600">
+                                  📍 {alt.place.district} · 距上一站{' '}
+                                  {alt.distance_from_prev_meters}m（約{' '}
+                                  {alt.travel_mins_from_prev} 分鐘）
+                                </div>
+                              </div>
+                              <span className="rounded-xl bg-teal-700 px-3.5 py-2 text-sm sm:text-base font-extrabold text-white shrink-0">
+                                換這家 ➔
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* 終點收斂卡片：高鐵／火車站／住宿飯店 */}
+              {activePlan.end_anchor && (
+                <div className="rounded-2xl border-2 border-rose-500 bg-rose-50/90 p-5 shadow-xs space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-3.5 py-1 text-base font-extrabold text-white">
+                      <Train className="h-4 w-4" />
+                      🏁 行程終點・順路返回
+                    </span>
+                    <span className="rounded-xl bg-white border border-rose-300 px-3 py-1 text-base font-extrabold text-rose-900">
+                      距離最後一站僅 {activePlan.end_anchor.distance_from_last_stop_meters}m（約 {activePlan.end_anchor.travel_mins_from_last_stop} 分鐘）
+                    </span>
+                  </div>
+                  <div className="text-xl sm:text-2xl font-extrabold text-rose-950">
+                    {activePlan.end_anchor.arrival_time} 抵達｜{activePlan.end_anchor.name}
+                  </div>
+                  {activePlan.end_anchor.return_departure_time && (
+                    <div className="text-base sm:text-lg font-bold text-emerald-900 bg-emerald-100/90 border border-emerald-300 rounded-xl px-3.5 py-2">
+                      🎫 您的班次為 {activePlan.end_anchor.return_departure_time} 發車，預計提早{' '}
+                      <strong>{activePlan.end_anchor.buffer_mins_remaining} 分鐘</strong>{' '}
+                      抵達車站還車進月台，完全不趕車！
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
       )}
     </div>
   );

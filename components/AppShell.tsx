@@ -67,97 +67,67 @@ export function AppShell({ initialTab = 'places' }: AppShellProps) {
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-stone-900 flex flex-col">
-      {/* Top Navigation Header */}
-      <header className="sticky top-0 z-30 border-b border-stone-200/90 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
-          {/* Brand Title */}
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-stone-900 text-amber-400 shadow-xs">
-              <Compass className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-extrabold tracking-tight text-stone-900">
-                  Wayfinder 旅途動態串聯與景點庫
-                </h1>
-                <span className="hidden sm:inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
-                  <Database className="h-3 w-3" />
-                  本機自動保存＋雲端雙引擎
-                </span>
+      {/* Top Navigation Header — Clean, Large Font, 2 Independent Sections */}
+      <header className="sticky top-0 z-30 border-b border-stone-200 bg-white/95 backdrop-blur-md shadow-xs">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-3 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-stone-900 text-amber-400 shadow-xs">
+                <Compass className="h-6 w-6" />
               </div>
-              <p className="text-xs text-stone-500">
-                隨手貼連結／IG文案秒存自動去重 · 旅途現場一鍵打卡與換站 · 免改 SQL 彈性分類
-              </p>
-            </div>
-          </div>
-
-          {/* Primary Mode Switcher + Settings Trigger */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-xl border border-stone-200 bg-stone-100 p-1">
-              <button
-                id="nav-tab-places"
-                type="button"
-                onClick={() => setActiveTab('places')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                  activeTab === 'places'
-                    ? 'bg-stone-900 text-white shadow-2xs'
-                    : 'text-stone-600 hover:text-stone-900'
-                }`}
-              >
-                <BookmarkCheck className="h-4 w-4 text-amber-400" />
-                景點庫與秒存更新 ({places.length})
-              </button>
-              <button
-                id="nav-tab-planner"
-                type="button"
-                onClick={() => setActiveTab('planner')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                  activeTab === 'planner'
-                    ? 'bg-amber-600 text-white shadow-2xs'
-                    : 'text-stone-600 hover:text-stone-900'
-                }`}
-              >
-                <Sparkles className="h-4 w-4" />
-                抵達當地・依想法串聯
-              </button>
+              <div>
+                <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-stone-900">
+                  Wayfinder 順路旅遊助手
+                </h1>
+              </div>
             </div>
 
             <button
               id="btn-header-settings"
               type="button"
               onClick={() => setIsSettingsOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 rounded-xl border border-stone-300 bg-stone-50 px-3.5 py-2 text-sm sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
             >
-              <Settings className="h-4 w-4 text-stone-600" />
-              <span className="hidden md:inline">彈性分類 & API 設定</span>
+              <Settings className="h-5 w-5 text-stone-600" />
+              <span>分類設定</span>
             </button>
           </div>
-        </div>
 
-        {/* Sub-Header Status Strip */}
-        <div className="border-t border-stone-100 bg-stone-50/80 px-4 sm:px-6 py-1.5">
-          <div className="mx-auto max-w-7xl flex flex-wrap items-center justify-between gap-2 text-xs text-stone-600">
-            <div className="flex flex-wrap items-center gap-4">
-              <span className="inline-flex items-center gap-1">
-                <MapPin className="h-3.5 w-3.5 text-amber-600" />
-                總收藏：<strong>{places.length}</strong> 筆
-              </span>
-              <span>
-                🌟 沒去過：<strong className="text-emerald-700">{unvisitedCount}</strong> 筆
-              </span>
-              <span>
-                ❤️ 去過想再去：<strong className="text-amber-700">{revisitCount}</strong> 筆
-              </span>
-            </div>
-            <div className="text-[11px] text-stone-500">
-              提示：點選任何卡片上的分類、造訪狀態或備註皆可「1 秒行內直接改」，無須跳出繁瑣表單
-            </div>
+          {/* 兩大獨立功能區塊切換（大字體、大按鈕） */}
+          <div className="grid grid-cols-2 gap-2.5 rounded-2xl bg-stone-100 p-1.5 border border-stone-200">
+            <button
+              id="nav-tab-places"
+              type="button"
+              onClick={() => setActiveTab('places')}
+              className={`flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-base sm:text-lg font-extrabold transition-all cursor-pointer ${
+                activeTab === 'places'
+                  ? 'bg-stone-900 text-white shadow-sm'
+                  : 'text-stone-600 hover:text-stone-900 hover:bg-white/60'
+              }`}
+            >
+              <BookmarkCheck className="h-5 w-5 text-amber-400 shrink-0" />
+              <span>1. 地點清單與分類 ({places.length})</span>
+            </button>
+
+            <button
+              id="nav-tab-planner"
+              type="button"
+              onClick={() => setActiveTab('planner')}
+              className={`flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-base sm:text-lg font-extrabold transition-all cursor-pointer ${
+                activeTab === 'planner'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-stone-600 hover:text-stone-900 hover:bg-white/60'
+              }`}
+            >
+              <Sparkles className="h-5 w-5 shrink-0" />
+              <span>2. 順路排程（對話＋地圖）</span>
+            </button>
           </div>
         </div>
       </header>
 
       {/* Main Content Container */}
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 py-6">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6 py-5">
         {activeTab === 'places' ? (
           <PlacesManagerView
             onOpenSettingsModal={() => setIsSettingsOpen(true)}

@@ -85,6 +85,15 @@ export const DEFAULT_CATEGORY_CONFIGS: CategoryConfig[] = [
 
 export const PRESET_DESTINATIONS = [
   {
+    id: 'tainan-westcentral',
+    label: '台灣・台南市・中西區（國華街／美術館）',
+    shortLabel: '台南・中西區／安平',
+    city: '台南市',
+    district: '中西區',
+    latitude: 22.9918,
+    longitude: 120.2008,
+  },
+  {
     id: 'kaohsiung-yancheng',
     label: '台灣・高雄市・鹽埕區（捷運鹽埕埔站）',
     shortLabel: '高雄・鹽埕區',

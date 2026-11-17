@@ -97,93 +97,69 @@ export function PlacesManagerView({
 
   return (
     <div className="space-y-5">
-      {/* Top Smart Quick-Add Bar ("秒存＋行內秒改") */}
+      {/* 頂部：新增地點大輸入框 */}
       <SmartQuickAddBar activeCity={selectedCity} />
 
-      {/* Region & Multi-Dimensional Filter Panel */}
-      <section className="rounded-2xl border border-stone-200 bg-white p-4 sm:p-5 shadow-2xs space-y-4">
-        {/* Row 1: City / Region Capsules + Batch Refresh Opening Hours Button */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3.5 border-b border-stone-100">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 text-xs font-bold text-stone-500 mr-1">
-              <Globe2 className="h-3.5 w-3.5 text-teal-700" />
-              地區歸檔：
+      {/* 獨立分類篩選面板（大字體、一目了然） */}
+      <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-5">
+        {/* 第一排：城市／地區選擇 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-stone-100">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-base font-extrabold text-stone-700 mr-1">
+              <Globe2 className="h-5 w-5 text-teal-700" />
+              📍 地區：
             </span>
             <button
               type="button"
               onClick={() => setSelectedCity('ALL')}
-              className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+              className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
                 selectedCity === 'ALL'
-                  ? 'bg-stone-900 text-white shadow-2xs'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200/70'
+                  ? 'bg-stone-900 text-white shadow-xs'
+                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
               }`}
             >
-              全部地區 ({places.length})
+              全部 ({places.length})
             </button>
             {cityGroups.map((grp) => (
               <button
                 key={grp.city}
                 type="button"
                 onClick={() => setSelectedCity(grp.city)}
-                className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
                   selectedCity === grp.city
-                    ? 'bg-stone-900 text-white shadow-2xs'
-                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200/70'
+                    ? 'bg-stone-900 text-white shadow-xs'
+                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
                 }`}
               >
-                {grp.country}・{grp.city} ({grp.count})
+                {grp.city} ({grp.count})
               </button>
             ))}
           </div>
 
-          {/* 1-Click Refresh Region Opening Hours */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              id="btn-batch-refresh-hours"
-              type="button"
-              disabled={isSyncing || filteredPlaces.length === 0}
-              onClick={handleBatchRefreshRegionHours}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50/70 px-3 py-1.5 text-xs font-semibold text-teal-900 hover:bg-teal-100 disabled:opacity-50 transition-colors cursor-pointer"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 text-teal-700 ${
-                  isSyncing ? 'animate-spin' : ''
-                }`}
-              />
-              一鍵更新本區營業資訊 ({filteredPlaces.length} 間)
-            </button>
-
-            <button
-              id="btn-open-category-settings"
-              type="button"
-              onClick={onOpenSettingsModal}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
-            >
-              <FolderCog className="h-3.5 w-3.5 text-amber-700" />
-              ＋ 新增／管理自訂分類
-            </button>
-          </div>
+          <button
+            id="btn-open-category-settings"
+            type="button"
+            onClick={onOpenSettingsModal}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+          >
+            <FolderCog className="h-4 w-4 text-amber-700" />
+            ＋ 自訂分類
+          </button>
         </div>
 
-        {lastSyncMessage && (
-          <div className="rounded-lg bg-teal-50 border border-teal-200 px-3 py-1.5 text-xs font-medium text-teal-900">
-            ✓ {lastSyncMessage}
-          </div>
-        )}
-
-        {/* Row 2: Sub-Category Pills */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 text-xs font-bold text-stone-500 mr-1">
-            <Filter className="h-3.5 w-3.5 text-amber-700" />
-            分類篩選：
+        {/* 第二排：地點類型分類（正餐、點心、伴手禮、展館...） */}
+        <div className="flex flex-wrap items-center gap-2 pb-4 border-b border-stone-100">
+          <span className="inline-flex items-center gap-1.5 text-base font-extrabold text-stone-700 mr-1">
+            <Filter className="h-5 w-5 text-amber-700" />
+            🏷️ 分類：
           </span>
           <button
             type="button"
             onClick={() => setSelectedSubCategory('ALL')}
-            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+            className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
               selectedSubCategory === 'ALL'
-                ? 'bg-amber-600 text-white'
-                : 'bg-stone-100 text-stone-600 hover:bg-stone-200/70'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
             }`}
           >
             全部分類
@@ -194,15 +170,16 @@ export function PlacesManagerView({
                 (selectedCity === 'ALL' || p.city === selectedCity) &&
                 p.sub_category === cfg.sub_category
             ).length;
+            if (count === 0 && selectedSubCategory !== cfg.sub_category) return null;
             return (
               <button
                 key={cfg.id}
                 type="button"
                 onClick={() => setSelectedSubCategory(cfg.sub_category)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
                   selectedSubCategory === cfg.sub_category
-                    ? 'bg-amber-600 text-white shadow-2xs'
-                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200/70'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
                 }`}
               >
                 {cfg.sub_label} ({count})
@@ -211,25 +188,25 @@ export function PlacesManagerView({
           })}
         </div>
 
-        {/* Row 3: Visit Status Filter + Keyword Search */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-          <div className="inline-flex flex-wrap items-center gap-1.5">
+        {/* 第三排：造訪狀態 ＋ 關鍵字搜尋 */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             {(
               [
-                { key: 'ALL', label: '全部造訪狀態' },
-                { key: 'unvisited', label: '🌟 沒去過（優先探索）' },
-                { key: 'visited_revisit', label: '❤️ 去過想再去' },
-                { key: 'visited_skip', label: '🚫 去過不推' },
+                { key: 'ALL', label: '全部狀態' },
+                { key: 'unvisited', label: '🌟 想去（沒去過）' },
+                { key: 'visited_revisit', label: '❤️ 想再去' },
+                { key: 'visited_skip', label: '🚫 不推薦' },
               ] as Array<{ key: 'ALL' | VisitStatus; label: string }>
             ).map((st) => (
               <button
                 key={st.key}
                 type="button"
                 onClick={() => setSelectedVisitStatus(st.key)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+                className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
                   selectedVisitStatus === st.key
-                    ? 'bg-stone-900 text-white'
-                    : 'border border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100'
+                    ? 'bg-teal-700 text-white shadow-xs'
+                    : 'border border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100'
                 }`}
               >
                 {st.label}
@@ -237,31 +214,31 @@ export function PlacesManagerView({
             ))}
           </div>
 
-          <div className="relative w-full sm:w-72">
-            <Search className="h-4 w-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <div className="relative w-full sm:w-80">
+            <Search className="h-5 w-5 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜尋店名、行政區、筆記或 #標籤..."
-              className="w-full rounded-xl border border-stone-300 bg-stone-50 pl-9 pr-3 py-1.5 text-xs text-stone-900 focus:border-amber-600 focus:bg-white focus:outline-none"
+              placeholder="搜尋店名、區域或備註..."
+              className="w-full rounded-xl border-2 border-stone-300 bg-stone-50 pl-10 pr-4 py-2 text-base font-medium text-stone-900 focus:border-amber-600 focus:bg-white focus:outline-none"
             />
           </div>
         </div>
       </section>
 
-      {/* Places Cards Grid */}
+      {/* 地點卡片清單（大字雙欄排版，手機單欄、平板電腦雙欄） */}
       {filteredPlaces.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-10 text-center space-y-2">
-          <p className="text-sm font-semibold text-stone-700">
-            沒有符合目前篩選條件的收藏景點
+        <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-white p-12 text-center space-y-2">
+          <p className="text-lg font-extrabold text-stone-700">
+            沒有符合目前篩選條件的地點
           </p>
-          <p className="text-xs text-stone-500">
-            您可以切換上方地區／分類標籤，或直接在最上方「全能智慧解析秒存列」貼上新店家！
+          <p className="text-base text-stone-500">
+            請切換上方「地區／分類」按鈕，或在最上方新增店家
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredPlaces.map((place) => (
             <PlaceCard key={place.id} place={place} />
           ))}

@@ -101,6 +101,8 @@ export interface ItineraryPlan {
   travel_mode: TravelMode;
   start_time: string;
   return_departure_time?: string | null;
+  time_fit_note?: string | null;
+  must_arrive_by?: string | null;
   origin: {
     name: string;
     latitude: number;
