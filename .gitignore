@@ -44,3 +44,5 @@ next-env.d.ts
 upload
 .bash*
 .profile
+.gemini
+.config
