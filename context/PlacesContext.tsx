@@ -81,14 +81,14 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const rawPlaces = localStorage.getItem(STORAGE_KEYS.PLACES);
-      if (rawPlaces) {
+      if (rawPlaces !== null) {
         const parsed = JSON.parse(rawPlaces);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setPlaces(parsed);
         }
       }
       const rawCats = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
-      if (rawCats) {
+      if (rawCats !== null) {
         const parsedCats = JSON.parse(rawCats);
         if (Array.isArray(parsedCats) && parsedCats.length > 0) {
           setCategoryConfigs(parsedCats);
