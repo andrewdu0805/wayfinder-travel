@@ -3,10 +3,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ExternalLink,
-  Layers,
+  KeyRound,
   Map as MapIcon,
   Navigation,
-  Sparkles,
+  Check,
+  X,
+  Compass,
 } from 'lucide-react';
 import { ItineraryPlan, SavedPlace, VisitStatus } from '@/types/place';
 import { usePlaces } from '@/context/PlacesContext';
@@ -24,30 +26,55 @@ export function RouteVisualizerMap({
   activePlan,
   onSelectPlace,
 }: RouteVisualizerMapProps) {
-  const { categoryConfigs, updatePlaceInline, settings } = usePlaces();
-  const [zoom, setZoom] = useState(1.0);
+  const { categoryConfigs, updatePlaceInline, settings, updateSettings } =
+    usePlaces();
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(
     activePlan?.stops?.[0]?.place.id || null
   );
 
-  const hasApiKey = Boolean(settings.googleMapsApiKey?.trim());
-  const [mapEngine, setMapEngine] = useState<'google' | 'vector'>(
-    hasApiKey ? 'google' : 'vector'
+  const effectiveApiKey =
+    settings.googleMapsApiKey?.trim() ||
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ||
+    '';
+  const hasApiKey = Boolean(effectiveApiKey);
+
+  // Map engine: 'google' (Google Maps JS) or 'street' (Real Street Map via Leaflet/CartoDB)
+  const [mapEngine, setMapEngine] = useState<'google' | 'street'>(
+    hasApiKey ? 'google' : 'street'
   );
   const [isGoogleLoaded, setIsGoogleLoaded] = useState(false);
   const [googleLoadError, setGoogleLoadError] = useState<string | null>(null);
 
+  // Quick API Key Modal / Dialog
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [keyInput, setKeyInput] = useState('');
+
+  // Refs for Google Maps
   const googleMapRef = useRef<HTMLDivElement | null>(null);
-  const mapInstanceRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<google.maps.Marker[]>([]);
-  const polylineRef = useRef<google.maps.Polyline | null>(null);
-  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const googleMapInstanceRef = useRef<google.maps.Map | null>(null);
+  const googleMarkersRef = useRef<google.maps.Marker[]>([]);
+  const googlePolylineRef = useRef<google.maps.Polyline | null>(null);
+  const googleInfoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+
+  // Refs for Leaflet Street Map
+  const leafletContainerRef = useRef<HTMLDivElement | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const leafletMapInstanceRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const leafletLayersRef = useRef<any[]>([]);
 
   const stops = activePlan?.stops || [];
   const selectedPlace =
     candidates.find((c) => c.id === selectedPlaceId) ||
     stops.find((s) => s.place.id === selectedPlaceId)?.place ||
     null;
+
+  // Auto-sync effectiveApiKey into settings if missing in localStorage
+  useEffect(() => {
+    if (!settings.googleMapsApiKey?.trim() && effectiveApiKey) {
+      updateSettings({ googleMapsApiKey: effectiveApiKey });
+    }
+  }, [settings.googleMapsApiKey, effectiveApiKey, updateSettings]);
 
   // Sync selectedPlaceId if plan changes
   useEffect(() => {
@@ -56,16 +83,34 @@ export function RouteVisualizerMap({
     }
   }, [stops, selectedPlaceId]);
 
-  // Load Google Maps JavaScript API dynamically if API key is provided
+  // Handle Google Maps auth failure gracefully
   useEffect(() => {
-    const apiKey = settings.googleMapsApiKey?.trim();
-    if (!apiKey) {
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).gm_authFailure = () => {
+        setGoogleLoadError(
+          'Google Maps API 驗證失敗（可能未開通 Billing、缺少 Maps JavaScript API 權限或金鑰錯誤），已自動切換為街道實景地圖。'
+        );
+        setMapEngine('street');
+      };
+    }
+  }, []);
+
+  // -------------------------------------------------------------
+  // 1. Google Maps SDK Loader
+  // -------------------------------------------------------------
+  useEffect(() => {
+    if (!effectiveApiKey) {
       setIsGoogleLoaded(false);
-      setMapEngine('vector');
+      setMapEngine('street');
       return;
     }
 
-    if (typeof window !== 'undefined' && (window as unknown as { google?: { maps?: unknown } }).google?.maps) {
+    // Check if already in window
+    if (
+      typeof window !== 'undefined' &&
+      (window as unknown as { google?: { maps?: unknown } }).google?.maps
+    ) {
       setIsGoogleLoaded(true);
       setMapEngine('google');
       return;
@@ -76,7 +121,9 @@ export function RouteVisualizerMap({
     if (!script) {
       script = document.createElement('script');
       script.id = scriptId;
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,geometry`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
+        effectiveApiKey
+      )}&libraries=places,geometry`;
       script.async = true;
       script.defer = true;
       script.onload = () => {
@@ -85,26 +132,38 @@ export function RouteVisualizerMap({
         setMapEngine('google');
       };
       script.onerror = () => {
-        setGoogleLoadError('Google Maps API 載入失敗，已自動切換回向量街區圖');
-        setMapEngine('vector');
+        setGoogleLoadError(
+          'Google Maps 載入失敗，已自動切換為開放街道實景圖。'
+        );
+        setMapEngine('street');
       };
       document.head.appendChild(script);
     } else {
       setIsGoogleLoaded(true);
       setMapEngine('google');
     }
-  }, [settings.googleMapsApiKey]);
+  }, [effectiveApiKey]);
 
-  // Render & Update Real Google Maps
+  // -------------------------------------------------------------
+  // 2. Render Google Maps
+  // -------------------------------------------------------------
   useEffect(() => {
-    if (mapEngine !== 'google' || !isGoogleLoaded || !googleMapRef.current) return;
-    if (typeof window === 'undefined' || !(window as unknown as { google?: { maps?: typeof google.maps } }).google?.maps) return;
+    if (mapEngine !== 'google' || !isGoogleLoaded || !googleMapRef.current)
+      return;
+    if (
+      typeof window === 'undefined' ||
+      !(
+        window as unknown as {
+          google?: { maps?: typeof google.maps };
+        }
+      ).google?.maps
+    )
+      return;
 
     const gmaps = google.maps;
 
-    // 1. Initialize map instance if not created
-    if (!mapInstanceRef.current) {
-      mapInstanceRef.current = new gmaps.Map(googleMapRef.current, {
+    if (!googleMapInstanceRef.current) {
+      googleMapInstanceRef.current = new gmaps.Map(googleMapRef.current, {
         center: { lat: origin.latitude, lng: origin.longitude },
         zoom: 14,
         mapTypeControl: true,
@@ -119,23 +178,23 @@ export function RouteVisualizerMap({
           },
         ],
       });
-      infoWindowRef.current = new gmaps.InfoWindow();
+      googleInfoWindowRef.current = new gmaps.InfoWindow();
     }
 
-    const map = mapInstanceRef.current;
-    const infoWindow = infoWindowRef.current;
+    const map = googleMapInstanceRef.current;
+    const infoWindow = googleInfoWindowRef.current;
 
-    // 2. Clear old markers and polyline
-    markersRef.current.forEach((m) => m.setMap(null));
-    markersRef.current = [];
-    if (polylineRef.current) {
-      polylineRef.current.setMap(null);
-      polylineRef.current = null;
+    // Clear old markers & polyline
+    googleMarkersRef.current.forEach((m) => m.setMap(null));
+    googleMarkersRef.current = [];
+    if (googlePolylineRef.current) {
+      googlePolylineRef.current.setMap(null);
+      googlePolylineRef.current = null;
     }
 
     const bounds = new gmaps.LatLngBounds();
 
-    // 3. Add Origin Marker
+    // Origin Marker
     const originPos = { lat: origin.latitude, lng: origin.longitude };
     bounds.extend(originPos);
     const originMarker = new gmaps.Marker({
@@ -144,7 +203,7 @@ export function RouteVisualizerMap({
       title: `🚩 起點：${origin.name}`,
       icon: {
         path: gmaps.SymbolPath.CIRCLE,
-        scale: 12,
+        scale: 13,
         fillColor: '#10b981',
         fillOpacity: 1,
         strokeColor: '#ffffff',
@@ -164,9 +223,9 @@ export function RouteVisualizerMap({
       `);
       infoWindow?.open(map, originMarker);
     });
-    markersRef.current.push(originMarker);
+    googleMarkersRef.current.push(originMarker);
 
-    // 4. Add Itinerary Stop Markers (1, 2, 3...)
+    // Stops
     stops.forEach((stop, idx) => {
       const pos = { lat: stop.place.latitude, lng: stop.place.longitude };
       bounds.extend(pos);
@@ -209,10 +268,10 @@ export function RouteVisualizerMap({
         infoWindow?.open(map, marker);
       });
 
-      markersRef.current.push(marker);
+      googleMarkersRef.current.push(marker);
     });
 
-    // 5. Add End-Anchor Marker if present (🚄 高鐵 / 🚆 火車站 / 🏨 飯店)
+    // End Anchor
     if (activePlan?.end_anchor) {
       const endPos = {
         lat: activePlan.end_anchor.latitude,
@@ -252,10 +311,10 @@ export function RouteVisualizerMap({
         `);
         infoWindow?.open(map, endMarker);
       });
-      markersRef.current.push(endMarker);
+      googleMarkersRef.current.push(endMarker);
     }
 
-    // 6. Draw Polyline Route
+    // Polyline
     const routeCoordinates = [
       originPos,
       ...stops.map((s) => ({
@@ -270,98 +329,267 @@ export function RouteVisualizerMap({
       });
     }
 
-    polylineRef.current = new gmaps.Polyline({
+    googlePolylineRef.current = new gmaps.Polyline({
       path: routeCoordinates,
       geodesic: true,
-      strokeColor: '#f59e0b',
+      strokeColor: '#d97706',
       strokeOpacity: 0.9,
       strokeWeight: 5,
       map,
     });
 
-    // 7. Adjust bounds
     if (stops.length > 0) {
       map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 });
     }
-  }, [mapEngine, isGoogleLoaded, origin, stops, activePlan?.end_anchor, selectedPlaceId, onSelectPlace]);
+  }, [
+    mapEngine,
+    isGoogleLoaded,
+    origin,
+    stops,
+    activePlan?.end_anchor,
+    selectedPlaceId,
+    onSelectPlace,
+  ]);
 
-  // Coordinate calculations for SVG vector fallback map
-  const allPoints = [
-    { lat: origin.latitude, lng: origin.longitude },
-    ...candidates.map((c) => ({ lat: c.latitude, lng: c.longitude })),
-    ...stops.map((s) => ({ lat: s.place.latitude, lng: s.place.longitude })),
-  ];
+  // -------------------------------------------------------------
+  // 3. Render Leaflet Street Map (Real CartoDB / OSM tiles)
+  // -------------------------------------------------------------
+  useEffect(() => {
+    let isCancelled = false;
 
-  const centerLat =
-    (Math.min(...allPoints.map((p) => p.lat)) +
-      Math.max(...allPoints.map((p) => p.lat))) /
-    2;
-  const centerLng =
-    (Math.min(...allPoints.map((p) => p.lng)) +
-      Math.max(...allPoints.map((p) => p.lng))) /
-    2;
+    async function initOrUpdateLeaflet() {
+      if (typeof window === 'undefined' || !leafletContainerRef.current) return;
 
-  const spanLat =
-    Math.max(
-      0.011,
-      Math.max(...allPoints.map((p) => p.lat)) -
-        Math.min(...allPoints.map((p) => p.lat)) +
-        0.005
-    ) / zoom;
-  const spanLng =
-    Math.max(
-      0.014,
-      Math.max(...allPoints.map((p) => p.lng)) -
-        Math.min(...allPoints.map((p) => p.lng)) +
-        0.006
-    ) / zoom;
+      const L = (await import('leaflet')).default;
+      if (isCancelled || !leafletContainerRef.current) return;
 
-  const minLat = centerLat - spanLat / 2;
-  const maxLat = centerLat + spanLat / 2;
-  const minLng = centerLng - spanLng / 2;
-  const maxLng = centerLng + spanLng / 2;
+      // Initialize map instance if not exists
+      if (!leafletMapInstanceRef.current) {
+        const lMap = L.map(leafletContainerRef.current, {
+          center: [origin.latitude, origin.longitude],
+          zoom: 14,
+          zoomControl: true,
+        });
 
-  const width = 680;
-  const height = 420;
+        // CartoDB Voyager tiles: Crisp, modern street map with clear Traditional Chinese & multilingual labels
+        L.tileLayer(
+          'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          {
+            attribution:
+              '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20,
+          }
+        ).addTo(lMap);
 
-  const project = (lat: number, lng: number) => {
-    const x =
-      ((lng - minLng) / Math.max(0.0001, maxLng - minLng)) * (width - 70) + 35;
-    const y =
-      height -
-      (((lat - minLat) / Math.max(0.0001, maxLat - minLat)) * (height - 70) +
-        35);
-    return { x, y };
+        leafletMapInstanceRef.current = lMap;
+      }
+
+      const lMap = leafletMapInstanceRef.current;
+      lMap.invalidateSize();
+
+      // Clear existing layers (markers & lines)
+      leafletLayersRef.current.forEach((layer) => {
+        lMap.removeLayer(layer);
+      });
+      leafletLayersRef.current = [];
+
+      const latLngs: [number, number][] = [];
+
+      // Origin Marker
+      const originIcon = L.divIcon({
+        className: 'origin-marker-pin',
+        html: `
+          <div style="display:flex; flex-direction:column; align-items:center; transform:translate(-50%, -100%);">
+            <div style="background:#10b981; color:white; width:32px; height:32px; border-radius:50%; border:2.5px solid white; display:flex; align-items:center; justify-content:center; font-size:16px; box-shadow:0 3px 8px rgba(0,0,0,0.35);">
+              🚩
+            </div>
+            <div style="background:rgba(15,23,42,0.92); color:#a7f3d0; font-size:11px; font-weight:800; padding:2px 7px; border-radius:6px; margin-top:2px; white-space:nowrap; border:1px solid #10b981; box-shadow:0 2px 5px rgba(0,0,0,0.25);">
+              起點：${origin.name.slice(0, 7)}
+            </div>
+          </div>
+        `,
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      });
+
+      const oMarker = L.marker([origin.latitude, origin.longitude], {
+        icon: originIcon,
+      }).addTo(lMap);
+      oMarker.bindPopup(`
+        <div style="font-family:sans-serif; padding:4px;">
+          <span style="font-size:11px; font-weight:bold; color:#10b981;">行程起點</span>
+          <h4 style="font-size:15px; font-weight:900; margin:2px 0;">${origin.name}</h4>
+        </div>
+      `);
+      leafletLayersRef.current.push(oMarker);
+      latLngs.push([origin.latitude, origin.longitude]);
+
+      // Stop Markers (1, 2, 3...)
+      stops.forEach((stop, idx) => {
+        const isSelected = stop.place.id === selectedPlaceId;
+        const stopIcon = L.divIcon({
+          className: 'stop-marker-pin',
+          html: `
+            <div style="display:flex; flex-direction:column; align-items:center; transform:translate(-50%, -100%);">
+              <div style="background:${isSelected ? '#e11d48' : '#d97706'}; color:white; width:${isSelected ? '32px' : '28px'}; height:${isSelected ? '32px' : '28px'}; border-radius:50%; border:2.5px solid white; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:${isSelected ? '14px' : '12px'}; box-shadow:0 3px 8px rgba(0,0,0,0.35);">
+                ${idx + 1}
+              </div>
+              <div style="background:${isSelected ? '#be123c' : 'rgba(15,23,42,0.92)'}; color:white; font-size:11px; font-weight:800; padding:2px 6px; border-radius:6px; margin-top:2px; white-space:nowrap; border:1px solid ${isSelected ? '#fda4af' : '#f59e0b'}; box-shadow:0 2px 5px rgba(0,0,0,0.25);">
+                ${stop.place.name.slice(0, 7)}
+              </div>
+            </div>
+          `,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        });
+
+        const sMarker = L.marker([stop.place.latitude, stop.place.longitude], {
+          icon: stopIcon,
+          zIndexOffset: isSelected ? 1000 : 100 + idx,
+        }).addTo(lMap);
+
+        sMarker.on('click', () => {
+          setSelectedPlaceId(stop.place.id);
+          onSelectPlace?.(stop.place);
+        });
+
+        sMarker.bindPopup(`
+          <div style="font-family:sans-serif; padding:4px; min-width:180px;">
+            <div style="font-size:11px; font-weight:bold; color:#d97706;">第 ${idx + 1} 站 ｜ 停留 ${stop.stay_mins} 分</div>
+            <h4 style="font-size:15px; font-weight:900; margin:2px 0; color:#0f172a;">${stop.place.name}</h4>
+            <div style="font-size:12px; color:#64748b; margin-bottom:4px;">
+              ${stop.arrival_time}–${stop.departure_time} ｜ ★ ${stop.place.rating || 4.5}
+            </div>
+            <div style="font-size:11px; color:#334155; line-height:1.4;">${stop.ai_reason}</div>
+          </div>
+        `);
+
+        leafletLayersRef.current.push(sMarker);
+        latLngs.push([stop.place.latitude, stop.place.longitude]);
+      });
+
+      // End Anchor Marker
+      if (activePlan?.end_anchor) {
+        const isHsr = activePlan.end_anchor.anchor_type === 'hsr';
+        const isTrain = activePlan.end_anchor.anchor_type === 'train';
+        const endIconEmoji = isHsr ? '🚄' : isTrain ? '🚆' : '🏨';
+
+        const endIcon = L.divIcon({
+          className: 'end-marker-pin',
+          html: `
+            <div style="display:flex; flex-direction:column; align-items:center; transform:translate(-50%, -100%);">
+              <div style="background:#e11d48; color:white; width:30px; height:30px; border-radius:50%; border:2.5px solid white; display:flex; align-items:center; justify-content:center; font-size:15px; box-shadow:0 3px 8px rgba(0,0,0,0.35);">
+                ${endIconEmoji}
+              </div>
+              <div style="background:rgba(15,23,42,0.92); color:#fecdd3; font-size:11px; font-weight:800; padding:2px 6px; border-radius:6px; margin-top:2px; white-space:nowrap; border:1px solid #e11d48; box-shadow:0 2px 5px rgba(0,0,0,0.25);">
+                終點：${activePlan.end_anchor.name.slice(0, 7)}
+              </div>
+            </div>
+          `,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        });
+
+        const eMarker = L.marker(
+          [activePlan.end_anchor.latitude, activePlan.end_anchor.longitude],
+          { icon: endIcon, zIndexOffset: 500 }
+        ).addTo(lMap);
+
+        eMarker.bindPopup(`
+          <div style="font-family:sans-serif; padding:4px;">
+            <div style="font-size:11px; font-weight:bold; color:#e11d48;">行程終點站</div>
+            <h4 style="font-size:15px; font-weight:900; margin:2px 0;">${activePlan.end_anchor?.name}</h4>
+            <div style="font-size:12px; color:#64748b;">${activePlan.end_anchor?.arrival_time} 抵達</div>
+          </div>
+        `);
+
+        leafletLayersRef.current.push(eMarker);
+        latLngs.push([
+          activePlan.end_anchor.latitude,
+          activePlan.end_anchor.longitude,
+        ]);
+      }
+
+      // Route Polyline
+      if (latLngs.length > 1) {
+        const polyline = L.polyline(latLngs, {
+          color: '#d97706',
+          weight: 5,
+          opacity: 0.85,
+          lineJoin: 'round',
+        }).addTo(lMap);
+        leafletLayersRef.current.push(polyline);
+
+        lMap.fitBounds(polyline.getBounds(), {
+          padding: [45, 45],
+          maxZoom: 16,
+        });
+      } else {
+        lMap.setView([origin.latitude, origin.longitude], 14);
+      }
+    }
+
+    initOrUpdateLeaflet();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    mapEngine,
+    origin,
+    stops,
+    activePlan?.end_anchor,
+    selectedPlaceId,
+    onSelectPlace,
+  ]);
+
+  // When switching engine, invalidate Leaflet size
+  useEffect(() => {
+    if (mapEngine === 'street' && leafletMapInstanceRef.current) {
+      setTimeout(() => {
+        leafletMapInstanceRef.current?.invalidateSize();
+      }, 100);
+    }
+  }, [mapEngine]);
+
+  const handleSaveApiKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = keyInput.trim();
+    if (!trimmed) return;
+    updateSettings({ googleMapsApiKey: trimmed });
+    setShowKeyModal(false);
+    setGoogleLoadError(null);
+    setMapEngine('google');
   };
-
-  const originPt = project(origin.latitude, origin.longitude);
-  const stopPoints = stops.map((s) => ({
-    stop: s,
-    ...project(s.place.latitude, s.place.longitude),
-  }));
-
-  const polylinePoints = [
-    `${originPt.x},${originPt.y}`,
-    ...stopPoints.map((p) => `${p.x},${p.y}`),
-  ].join(' ');
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-stone-900 text-stone-100 overflow-hidden shadow-xs space-y-0">
-      {/* Map Header with Engine Switcher (Google Maps vs Vector) */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-stone-800 bg-stone-950/80">
+      {/* Map Header with Engine Switcher (Google Maps vs Real Street Map) */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-stone-800 bg-stone-950/90">
         <div className="flex items-center gap-2">
           {mapEngine === 'google' ? (
             <MapIcon className="h-5 w-5 text-teal-400 shrink-0" />
           ) : (
-            <Navigation className="h-5 w-5 text-amber-400 shrink-0" />
+            <Compass className="h-5 w-5 text-amber-400 shrink-0" />
           )}
           <span className="text-sm sm:text-base font-extrabold text-white">
-            {mapEngine === 'google' ? 'Google Maps 實景地圖' : '向量順路街區圖'}
+            {mapEngine === 'google' ? 'Google Maps 實景地圖' : '開放街道實景圖'}
           </span>
-          {hasApiKey && (
-            <span className="rounded-md bg-teal-900/60 border border-teal-500/40 px-2 py-0.5 text-xs font-bold text-teal-300">
+          {hasApiKey ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-teal-900/60 border border-teal-500/40 px-2 py-0.5 text-xs font-bold text-teal-300">
+              <Check className="h-3 w-3" />
               API 已啟用
             </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowKeyModal(true)}
+              className="inline-flex items-center gap-1 rounded-md bg-amber-500/20 border border-amber-400/40 px-2 py-0.5 text-xs font-bold text-amber-300 hover:bg-amber-500/30 cursor-pointer transition-colors"
+            >
+              <KeyRound className="h-3 w-3" />
+              貼上 Key 啟用 Google
+            </button>
           )}
         </div>
 
@@ -370,27 +598,37 @@ export function RouteVisualizerMap({
           <div className="inline-flex rounded-xl bg-stone-800 p-1 border border-stone-700">
             <button
               type="button"
-              disabled={!hasApiKey}
-              onClick={() => setMapEngine('google')}
+              onClick={() => {
+                if (!hasApiKey) {
+                  setShowKeyModal(true);
+                } else {
+                  setMapEngine('google');
+                }
+              }}
               className={`rounded-lg px-2.5 py-1 text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                 mapEngine === 'google'
                   ? 'bg-teal-600 text-white shadow-xs'
-                  : 'text-stone-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed'
+                  : 'text-stone-300 hover:text-white'
               }`}
-              title={hasApiKey ? '切換為真實 Google Maps 實景' : '請先在「分類設定」填入 Google Maps API Key'}
+              title={
+                hasApiKey
+                  ? '切換為真實 Google Maps 實景'
+                  : '點擊輸入 Google Maps API Key 即可開啟'
+              }
             >
               🗺️ Google Maps
             </button>
             <button
               type="button"
-              onClick={() => setMapEngine('vector')}
+              onClick={() => setMapEngine('street')}
               className={`rounded-lg px-2.5 py-1 text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                mapEngine === 'vector'
+                mapEngine === 'street'
                   ? 'bg-amber-600 text-white shadow-xs'
                   : 'text-stone-300 hover:text-white'
               }`}
+              title="切換為開放街道實景圖（免 API Key 即享完整街區、站名與路網）"
             >
-              🎨 向量圖
+              🌍 街道實景圖
             </button>
           </div>
 
@@ -399,8 +637,9 @@ export function RouteVisualizerMap({
               href={activePlan.google_maps_nav_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-teal-700 px-3 py-1.5 text-xs sm:text-sm font-extrabold text-white hover:bg-teal-800 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-teal-700 px-3 py-1.5 text-xs sm:text-sm font-extrabold text-white hover:bg-teal-800 transition-colors shadow-xs"
             >
+              <Navigation className="h-3.5 w-3.5" />
               導航
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
@@ -408,217 +647,66 @@ export function RouteVisualizerMap({
         </div>
       </div>
 
-      {googleLoadError && mapEngine === 'vector' && (
-        <div className="bg-amber-950/40 border-b border-amber-800/40 px-4 py-2 text-xs text-amber-300 font-medium">
-          ⚠️ {googleLoadError}
+      {/* Quick API Key Prompt Banner (shown if no key is set) */}
+      {!hasApiKey && (
+        <div className="bg-amber-950/60 border-b border-amber-800/50 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200">
+          <div className="flex items-center gap-1.5 font-medium">
+            <span>💡 目前以「開放街道實景圖」清晰顯示路網與站牌。</span>
+            <span className="hidden sm:inline">已有 Google Maps API Key？</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowKeyModal(true)}
+            className="rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 px-2.5 py-1 font-black text-xs cursor-pointer transition-colors shadow-xs"
+          >
+            🔑 點此貼上 Key 開啟 Google Maps
+          </button>
+        </div>
+      )}
+
+      {/* Google Maps Load Error Notice */}
+      {googleLoadError && mapEngine === 'street' && (
+        <div className="bg-amber-950/50 border-b border-amber-800/40 px-4 py-2 text-xs text-amber-300 font-medium flex items-center justify-between">
+          <span>⚠️ {googleLoadError}</span>
+          <button
+            type="button"
+            onClick={() => setShowKeyModal(true)}
+            className="underline font-bold hover:text-white cursor-pointer ml-2"
+          >
+            更換 Key
+          </button>
         </div>
       )}
 
       {/* Main Map Canvas Area */}
-      <div className="relative w-full bg-[#0d1620]">
+      <div className="relative w-full h-[380px] sm:h-[450px] bg-stone-100 overflow-hidden">
         {/* Real Google Maps Container */}
         <div
           ref={googleMapRef}
           style={{ display: mapEngine === 'google' ? 'block' : 'none' }}
-          className="w-full h-[380px] sm:h-[440px]"
+          className="w-full h-full"
         />
 
-        {/* Vector SVG Fallback Map */}
-        {mapEngine === 'vector' && (
-          <div className="relative w-full overflow-hidden">
-            <svg
-              viewBox={`0 0 ${width} ${height}`}
-              className="w-full h-[360px] sm:h-[420px] block"
-            >
-              {/* Rings */}
-              {[75, 145, 210].map((r) => (
-                <circle
-                  key={r}
-                  cx={originPt.x}
-                  cy={originPt.y}
-                  r={r}
-                  fill="none"
-                  stroke="rgba(245, 158, 11, 0.08)"
-                  strokeWidth="1.2"
-                />
-              ))}
+        {/* Real Street Map (Leaflet) Container */}
+        <div
+          ref={leafletContainerRef}
+          style={{ display: mapEngine === 'street' ? 'block' : 'none' }}
+          className="w-full h-full z-0"
+        />
 
-              {/* Grid Lines */}
-              {Array.from({ length: 9 }).map((_, i) => (
-                <line
-                  key={`gx-${i}`}
-                  x1={i * 75}
-                  y1={0}
-                  x2={i * 75}
-                  y2={height}
-                  stroke="rgba(148, 163, 184, 0.08)"
-                  strokeWidth="1"
-                />
-              ))}
-              {Array.from({ length: 6 }).map((_, i) => (
-                <line
-                  key={`gy-${i}`}
-                  x1={0}
-                  y1={i * 70}
-                  x2={width}
-                  y2={i * 70}
-                  stroke="rgba(148, 163, 184, 0.08)"
-                  strokeWidth="1"
-                />
-              ))}
-
-              {/* Route Polyline */}
-              {stopPoints.length > 0 && (
-                <>
-                  <polyline
-                    points={polylinePoints}
-                    fill="none"
-                    stroke="rgba(245, 158, 11, 0.3)"
-                    strokeWidth="8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <polyline
-                    points={polylinePoints}
-                    fill="none"
-                    stroke="#f59e0b"
-                    strokeWidth="3.5"
-                    strokeDasharray="6 4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </>
-              )}
-
-              {/* Origin Marker */}
-              <g
-                transform={`translate(${originPt.x}, ${originPt.y})`}
-                className="cursor-pointer"
-              >
-                <circle
-                  r="14"
-                  fill="#10b981"
-                  stroke="#ffffff"
-                  strokeWidth="2.5"
-                />
-                <text
-                  textAnchor="middle"
-                  dy="4"
-                  fontSize="10"
-                  fontWeight="bold"
-                  fill="#ffffff"
-                >
-                  🚩
-                </text>
-                <rect
-                  x="-45"
-                  y="18"
-                  width="90"
-                  height="18"
-                  rx="4"
-                  fill="rgba(15, 23, 42, 0.85)"
-                  stroke="#10b981"
-                  strokeWidth="1"
-                />
-                <text
-                  x="0"
-                  y="30"
-                  textAnchor="middle"
-                  fontSize="9.5"
-                  fontWeight="bold"
-                  fill="#a7f3d0"
-                >
-                  {origin.name.slice(0, 6)}
-                </text>
-              </g>
-
-              {/* Stop Markers */}
-              {stopPoints.map((pt, idx) => {
-                const isSelected = pt.stop.place.id === selectedPlaceId;
-                return (
-                  <g
-                    key={pt.stop.place.id}
-                    transform={`translate(${pt.x}, ${pt.y})`}
-                    onClick={() => {
-                      setSelectedPlaceId(pt.stop.place.id);
-                      onSelectPlace?.(pt.stop.place);
-                    }}
-                    className="cursor-pointer"
-                  >
-                    <circle
-                      r={isSelected ? '16' : '13'}
-                      fill={isSelected ? '#e11d48' : '#d97706'}
-                      stroke="#ffffff"
-                      strokeWidth="2.5"
-                    />
-                    <text
-                      textAnchor="middle"
-                      dy="4"
-                      fontSize="11"
-                      fontWeight="bold"
-                      fill="#ffffff"
-                    >
-                      {idx + 1}
-                    </text>
-                    <rect
-                      x="-48"
-                      y="18"
-                      width="96"
-                      height="18"
-                      rx="4"
-                      fill={isSelected ? '#be123c' : 'rgba(15, 23, 42, 0.85)'}
-                      stroke={isSelected ? '#fda4af' : '#d97706'}
-                      strokeWidth="1"
-                    />
-                    <text
-                      x="0"
-                      y="30"
-                      textAnchor="middle"
-                      fontSize="10"
-                      fontWeight="bold"
-                      fill="#ffffff"
-                    >
-                      {pt.stop.place.name.slice(0, 6)}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-
-            {/* Zoom Controls for Vector Map */}
-            <div className="absolute top-3 right-3 flex flex-col gap-1.5 z-10">
-              <button
-                type="button"
-                onClick={() => setZoom((z) => Math.min(2.4, Number((z * 1.25).toFixed(2))))}
-                className="h-8 w-8 rounded-lg bg-stone-900/90 text-white font-black text-sm border border-stone-700 shadow-xs flex items-center justify-center cursor-pointer"
-                title="放大"
-              >
-                ＋
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoom((z) => Math.max(0.6, Number((z * 0.8).toFixed(2))))}
-                className="h-8 w-8 rounded-lg bg-stone-900/90 text-white font-black text-sm border border-stone-700 shadow-xs flex items-center justify-center cursor-pointer"
-                title="縮小"
-              >
-                －
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Selected Place Overlay Card (Clean, Large font, works on both Google and Vector map) */}
+        {/* Selected Place Overlay Card */}
         {selectedPlace && (
-          <div className="m-3 rounded-2xl border-2 border-amber-500/60 bg-stone-950/95 p-4 text-stone-100 shadow-xl space-y-3">
+          <div className="absolute bottom-3 left-3 right-3 z-[1000] rounded-2xl border-2 border-amber-500/70 bg-stone-950/95 p-4 text-stone-100 shadow-2xl space-y-3 backdrop-blur-md">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <span className="text-xs sm:text-sm text-amber-400 font-extrabold">
-                  📍 {selectedPlace.city}・{selectedPlace.district} ｜ ★ {selectedPlace.rating || 4.5}
+                  📍 {selectedPlace.city}・{selectedPlace.district} ｜ ★{' '}
+                  {selectedPlace.rating || 4.5}
                 </span>
                 <h4 className="text-base sm:text-lg font-black text-white">
                   {selectedPlace.name}
                 </h4>
-                <p className="text-stone-300 text-xs sm:text-sm">
+                <p className="text-stone-300 text-xs sm:text-sm line-clamp-1">
                   📝 {selectedPlace.user_notes || '無備註'}
                 </p>
               </div>
@@ -685,6 +773,73 @@ export function RouteVisualizerMap({
           </div>
         )}
       </div>
+
+      {/* Quick API Key Modal */}
+      {showKeyModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl border border-stone-700 bg-stone-900 p-6 text-stone-100 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MapIcon className="h-6 w-6 text-teal-400" />
+                <h3 className="text-lg font-black text-white">
+                  設定 Google Maps API Key
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowKeyModal(false)}
+                className="text-stone-400 hover:text-white cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="text-xs sm:text-sm text-stone-300 leading-relaxed">
+              貼上您的 Google Maps JavaScript API 金鑰，即可在網頁直接使用官方
+              Google Maps 實景地圖（包含衛星圖、街景服務等）。
+            </p>
+
+            <form onSubmit={handleSaveApiKey} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-stone-300 mb-1.5">
+                  API 金鑰（以 AIzaSy... 開頭）
+                </label>
+                <input
+                  type="text"
+                  placeholder="AIzaSy..."
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  className="w-full rounded-xl bg-stone-950 border border-stone-700 px-3.5 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-teal-500"
+                  autoFocus
+                />
+              </div>
+
+              <div className="rounded-xl bg-stone-800/70 p-3 text-xs text-stone-300 space-y-1">
+                <p className="font-bold text-amber-300">💡 提示：</p>
+                <p>• 若未輸入金鑰，仍可使用高解析度「開放街道實景圖」。</p>
+                <p>• 也可隨時點右上角「導航」直接在 Google Maps App 開啟。</p>
+              </div>
+
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowKeyModal(false)}
+                  className="rounded-xl bg-stone-800 px-4 py-2 text-xs sm:text-sm font-bold text-stone-300 hover:text-white cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={!keyInput.trim()}
+                  className="rounded-xl bg-teal-600 px-5 py-2 text-xs sm:text-sm font-black text-white hover:bg-teal-500 disabled:opacity-40 cursor-pointer shadow-xs transition-colors"
+                >
+                  儲存並立即啟用
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

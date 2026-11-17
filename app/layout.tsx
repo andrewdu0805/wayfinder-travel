@@ -16,6 +16,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-Hant">
+      <head>
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          crossOrigin=""
+        />
+      </head>
       <body className="antialiased bg-[#FAF8F5] text-stone-900">
         <PlacesProvider>{children}</PlacesProvider>
       </body>

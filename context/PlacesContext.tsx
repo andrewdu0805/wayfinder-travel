@@ -29,8 +29,8 @@ const STORAGE_KEYS = {
 const DEFAULT_SETTINGS: AppSettings = {
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-  googleMapsApiKey: '',
-  geminiApiKey: '',
+  googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+  geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
   autoRefreshHoursOnPlan: true,
   defaultTravelMode: 'WALK',
   defaultRadiusMeters: 5000,
@@ -97,7 +97,20 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       const rawSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (rawSettings) {
         const parsedSettings = JSON.parse(rawSettings);
-        setSettings((prev) => ({ ...prev, ...parsedSettings }));
+        setSettings((prev) => ({
+          ...prev,
+          ...parsedSettings,
+          googleMapsApiKey:
+            parsedSettings.googleMapsApiKey?.trim() ||
+            prev.googleMapsApiKey ||
+            process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+            '',
+          geminiApiKey:
+            parsedSettings.geminiApiKey?.trim() ||
+            prev.geminiApiKey ||
+            process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
+            '',
+        }));
       }
     } catch (e) {
       console.warn('Failed to hydrate state from localStorage:', e);
