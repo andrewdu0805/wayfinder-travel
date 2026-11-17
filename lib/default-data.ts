@@ -713,6 +713,37 @@ export const INITIAL_SAVED_PLACES: SavedPlace[] = [
 
   // ================= 台灣・台南市（中西區步行密集圈 ＆ 安平區機車跨區圈） =================
   {
+    id: 'tn-wang-goat',
+    google_place_id: 'ChIJ_wang_smoked_goat_tainan',
+    name: '王家燻羊肉',
+    formatted_address: '719台灣台南市龍崎區土崎里烏樹林34號',
+    country: '台灣',
+    city: '台南市',
+    district: '龍崎區',
+    latitude: 22.9515,
+    longitude: 120.385,
+    primary_category: 'restaurant',
+    sub_category: 'meal',
+    visit_status: 'unvisited',
+    business_status: 'OPERATIONAL',
+    estimated_stay_mins: 80,
+    rating: 4.2,
+    opening_hours_json: {
+      open_now: true,
+      weekday_descriptions: ['週一至週日 11:00–19:00（每週二公休）'],
+      daily_hours: { open: '11:00', close: '19:00' },
+    },
+    google_maps_url:
+      'https://www.google.com/maps/search/?api=1&query=王家燻羊肉+台南市龍崎區',
+    user_notes:
+      '台南龍崎在地深山古法稻殼燻羊肉，肉質細嫩無騷味，推薦必點古法燻羊肉與蒜油麵線',
+    custom_tags: ['#台南美食', '#古法燻羊肉', '#龍崎必吃'],
+    last_visited_at: null,
+    hours_updated_at: nowIso,
+    created_at: nowIso,
+    updated_at: nowIso,
+  },
+  {
     id: 'tn-01',
     google_place_id: 'ChIJ_tainan_art_museum_bldg2',
     name: '臺南市美術館 2 館',

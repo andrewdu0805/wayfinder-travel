@@ -44,7 +44,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
     setErrorMsg(null);
     try {
       const targetCity =
-        activeCity === 'ALL' ? '高雄市' : activeCity;
+        activeCity === 'ALL' ? '' : activeCity;
       const res = await fetch('/api/smart-parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

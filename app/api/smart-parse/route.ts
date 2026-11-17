@@ -126,6 +126,21 @@ const BUILTIN_GAZETTEER: KnownPlaceTemplate[] = [
     default_notes: '日本鈴鹿賽道海外唯一授權卡丁車主題樂園',
     tags: ['#卡丁車', '#主題樂園'],
   },
+  {
+    keywords: ['王家燻羊肉', '燻羊肉', '龍崎燻羊肉'],
+    google_place_id: 'ChIJ_wang_smoked_goat_tainan',
+    name: '王家燻羊肉',
+    formatted_address: '719台灣台南市龍崎區土崎里烏樹林34號',
+    latitude: 22.9515,
+    longitude: 120.385,
+    primary_category: 'restaurant',
+    sub_category: 'meal',
+    estimated_stay_mins: 80,
+    rating: 4.2,
+    daily_hours: { open: '11:00', close: '19:00' },
+    default_notes: '台南龍崎在地深山古法稻殼燻羊肉，肉質細嫩無羶味，必點燻羊肉與蒜油麵線',
+    tags: ['#台南美食', '#古法燻羊肉', '#龍崎必吃'],
+  },
 ];
 
 function inferCategoryHeuristic(
@@ -246,25 +261,63 @@ export async function POST(req: NextRequest) {
     }
 
     let resolvedInput = rawInput;
-    // Step 1: If input contains a short URL (maps.app.goo.gl / goo.gl), try resolving redirect if possible
+    let urlDetectedName: string | undefined;
+    let urlDetectedAddress: string | undefined;
+    let urlDetectedCoords: { lat: number; lng: number } | undefined;
+
+    // Step 1: Detect Google Maps short URLs or desktop URLs and extract destination metadata
     const urlMatch = rawInput.match(/https?:\/\/[^\s)]+/i);
-    if (
-      urlMatch &&
-      (urlMatch[0].includes('maps.app.goo.gl') ||
-        urlMatch[0].includes('goo.gl/maps'))
-    ) {
+    if (urlMatch) {
+      const targetUrl = urlMatch[0];
       try {
-        const res = await fetch(urlMatch[0], {
-          method: 'HEAD',
+        const res = await fetch(targetUrl, {
+          method: 'GET',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+          },
           redirect: 'follow',
-          signal: AbortSignal.timeout(3500),
+          signal: AbortSignal.timeout(4500),
         });
-        if (res.url && res.url !== urlMatch[0]) {
-          const decodedUrl = decodeURIComponent(res.url);
-          resolvedInput = `${rawInput} [展開網址: ${decodedUrl}]`;
+
+        const finalUrl = res.url || targetUrl;
+        const decodedUrl = decodeURIComponent(finalUrl);
+        resolvedInput = `${rawInput} [展開網址: ${decodedUrl}]`;
+
+        // Check /place/<PlaceName> in URL
+        const placeMatch = decodedUrl.match(/\/place\/([^/@?]+)/);
+        if (placeMatch) {
+          urlDetectedName = placeMatch[1].replace(/\+/g, ' ').trim();
+        }
+
+        // Check coordinates @lat,lng
+        const coordMatch = decodedUrl.match(/@([0-9.-]+),([0-9.-]+)/);
+        if (coordMatch) {
+          const lat = parseFloat(coordMatch[1]);
+          const lng = parseFloat(coordMatch[2]);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            urlDetectedCoords = { lat, lng };
+          }
+        }
+
+        // Parse HTML OpenGraph / title metadata
+        const html = await res.text();
+        const ogTitleMatch =
+          html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i) ||
+          html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
+        if (
+          ogTitleMatch &&
+          ogTitleMatch[1] &&
+          !ogTitleMatch[1].includes('Google Maps') &&
+          !ogTitleMatch[1].includes('Google 地圖')
+        ) {
+          const parts = ogTitleMatch[1].split(/·|-/).map((s) => s.trim());
+          if (parts[0] && !urlDetectedName) urlDetectedName = parts[0];
+          if (parts[1] && !urlDetectedAddress) urlDetectedAddress = parts[1];
         }
       } catch {
-        // Ignore network redirect errors in sandboxed/offline mode and rely on input text
+        // Fall back to text parsing if network request is blocked or times out
       }
     }
 
@@ -414,25 +467,59 @@ ${resolvedInput}`,
 
     // Step 4: Fallback intelligent text splitter if Gemini key wasn't provided
     if (extractedCandidates.length === 0) {
-      // Check if text has quoted store names like 「店名」 or 『店名』 or multiple lines
+      // Check if text has quoted store names like 「店名」 or 『店名』
       const quotedMatches = Array.from(
-        rawInput.matchAll(/[「『【]([^」』】]{2,22})[」』】]/g)
+        rawInput.matchAll(/[「『【]([^」』】]{2,30})[」』】]/g)
       ).map((m) => m[1].trim());
+
+      // Check if lines contain address or store names from Google Maps share text
+      const rawLines = rawInput
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      let foundStoreName = urlDetectedName || '';
+      let foundAddress = urlDetectedAddress || '';
+
+      for (const line of rawLines) {
+        if (/https?:\/\//i.test(line)) continue;
+        if (
+          /(台灣|7\d\d|8\d\d|台北|臺北|新北|桃園|台中|臺中|台南|臺南|高雄|基隆|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖)/.test(
+            line
+          ) &&
+          /(市|區|鎮|鄉|路|街|號)/.test(line)
+        ) {
+          if (!foundAddress) foundAddress = line;
+          continue;
+        }
+        if (/^[0-9.]+\s*★|★+|已打烊|開始營業|營業中|查看附近的餐廳|儲存至/.test(line)) {
+          continue;
+        }
+        const cleaned = line
+          .replace(/^[在於\s]*Google\s*地圖上查看[「『【\s:]*/i, '')
+          .replace(/[」』】:：]/g, '')
+          .trim();
+        if (cleaned && !foundStoreName && cleaned.length <= 40) {
+          foundStoreName = cleaned;
+        }
+      }
 
       const rawNames =
         quotedMatches.length > 0
           ? quotedMatches
+          : foundStoreName
+          ? [foundStoreName]
           : rawInput
               .split(/\n|；|;/)
               .map((s) => s.trim())
               .filter(Boolean);
 
       for (const rawItem of rawNames) {
-        // Clean URL and notes from name
         const withoutUrl = rawItem.replace(/https?:\/\/[^\s)]+/gi, '').trim();
         const parts = withoutUrl.split(/\s+[—\-｜|]\s+|\s*\(([^)]+)\)\s*/);
         const cleanName =
           (parts[0] || withoutUrl).replace(/^[0-9.、・\s]+/, '').trim() ||
+          foundStoreName ||
           '新收藏景點';
         const notePart =
           parts.slice(1).filter(Boolean).join(' ') ||
@@ -444,7 +531,7 @@ ${resolvedInput}`,
 
         extractedCandidates.push({
           name: cleanName,
-          addressHint: defaultCity,
+          addressHint: foundAddress || defaultCity,
           primary_category: heuristic.primary_category,
           sub_category: heuristic.sub_category,
           visit_status: heuristic.visit_status,
@@ -455,26 +542,68 @@ ${resolvedInput}`,
       }
     }
 
-    // Step 5: Enrich each candidate with Google Places API (New) if key is available, or smart city coordinates
-    const cityCenterMap: Record<string, { lat: number; lng: number; dist: string; country: string }> = {
+    // Step 5: Enrich each candidate with Google Places API if key is available, or smart city coordinates
+    const cityCenterMap: Record<
+      string,
+      { lat: number; lng: number; dist: string; country: string }
+    > = {
+      台南市: { lat: 22.9905, lng: 120.191, dist: '中西區', country: '台灣' },
       高雄市: { lat: 22.6238, lng: 120.2838, dist: '鹽埕區', country: '台灣' },
       台北市: { lat: 25.0568, lng: 121.5098, dist: '大同區', country: '台灣' },
+      新北市: { lat: 25.0169, lng: 121.4627, dist: '板橋區', country: '台灣' },
+      台中市: { lat: 24.1477, lng: 120.6736, dist: '中區', country: '台灣' },
+      桃園市: { lat: 24.9936, lng: 121.3009, dist: '桃園區', country: '台灣' },
+      嘉義市: { lat: 23.48, lng: 120.4491, dist: '東區', country: '台灣' },
+      屏東縣: { lat: 22.6762, lng: 120.4885, dist: '屏東市', country: '台灣' },
+      宜蘭縣: { lat: 24.757, lng: 121.753, dist: '宜蘭市', country: '台灣' },
+      花蓮縣: { lat: 23.9772, lng: 121.6044, dist: '花蓮市', country: '台灣' },
+      台東縣: { lat: 22.756, lng: 121.1444, dist: '台東市', country: '台灣' },
       東京都: { lat: 35.7118, lng: 139.7965, dist: '台東區', country: '日本' },
+      京都府: { lat: 35.0037, lng: 135.768, dist: '中京區', country: '日本' },
+      大阪府: { lat: 34.6937, lng: 135.5023, dist: '中央區', country: '日本' },
     };
-    const baseCenter = cityCenterMap[defaultCity] || cityCenterMap['高雄市'];
 
     for (let i = 0; i < extractedCandidates.length; i++) {
       const cand = extractedCandidates[i];
+
+      // Detect city from candidate address or name
+      const textToSearchCity = `${cand.addressHint} ${cand.name} ${rawInput}`;
+      const cityMatch = textToSearchCity.match(
+        /(台北市|臺北市|新北市|桃園市|台中市|臺中市|台南市|臺南市|高雄市|基隆市|新竹市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義市|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|臺東縣|澎湖縣|金門縣|東京都|京都府|大阪府)/
+      );
+      const detectedCityKey = cityMatch
+        ? cityMatch[1].replace('臺', '台')
+        : (defaultCity in cityCenterMap ? defaultCity : '台南市');
+
+      const baseCenter =
+        cityCenterMap[detectedCityKey] ||
+        (defaultCity in cityCenterMap ? cityCenterMap[defaultCity] : cityCenterMap['台南市']);
+
       let placeId = `custom_${cand.name.replace(/\s+/g, '_').toLowerCase()}`;
-      let formattedAddress = `${baseCenter.country}${defaultCity}${baseCenter.dist}${cand.name}`;
-      let lat = baseCenter.lat + (Math.sin(i * 1.9 + cand.name.length) * 0.0045);
-      let lng = baseCenter.lng + (Math.cos(i * 1.9 + cand.name.length) * 0.0045);
+      let formattedAddress =
+        urlDetectedAddress ||
+        (cand.addressHint && cand.addressHint !== defaultCity
+          ? cand.addressHint
+          : `${baseCenter.country}${detectedCityKey}${baseCenter.dist}${cand.name}`);
+      let lat =
+        urlDetectedCoords?.lat ??
+        baseCenter.lat + Math.sin(i * 1.9 + cand.name.length) * 0.0045;
+      let lng =
+        urlDetectedCoords?.lng ??
+        baseCenter.lng + Math.cos(i * 1.9 + cand.name.length) * 0.0045;
       let rating: number | null = 4.5;
       let weekdayDescriptions = ['每日 10:00–21:00'];
       let dailyHours = { open: '10:00', close: '21:00' };
 
       if (googleMapsApiKey && googleMapsApiKey !== 'your-google-maps-api-key') {
         try {
+          const searchQuery =
+            cand.addressHint &&
+            cand.addressHint !== defaultCity &&
+            !cand.name.includes(cand.addressHint)
+              ? `${cand.name} ${cand.addressHint}`
+              : cand.name;
+
           const placesRes = await fetch(
             'https://places.googleapis.com/v1/places:searchText',
             {
@@ -486,7 +615,7 @@ ${resolvedInput}`,
                   'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus',
               },
               body: JSON.stringify({
-                textQuery: `${cand.name} ${cand.addressHint || defaultCity}`,
+                textQuery: searchQuery,
                 languageCode: 'zh-TW',
               }),
               signal: AbortSignal.timeout(5000),
@@ -497,12 +626,16 @@ ${resolvedInput}`,
             const top = placesData.places?.[0];
             if (top) {
               placeId = top.id || placeId;
+              if (top.displayName?.text) {
+                cand.name = top.displayName.text;
+              }
               formattedAddress = top.formattedAddress || formattedAddress;
               lat = top.location?.latitude ?? lat;
               lng = top.location?.longitude ?? lng;
               rating = top.rating ?? rating;
               if (top.regularOpeningHours?.weekdayDescriptions) {
-                weekdayDescriptions = top.regularOpeningHours.weekdayDescriptions;
+                weekdayDescriptions =
+                  top.regularOpeningHours.weekdayDescriptions;
               }
             }
           }
