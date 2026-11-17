@@ -259,26 +259,23 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
         </div>
       </div>
 
-      {/* 指定新增地區／智慧辨識 */}
-      <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-bold text-stone-600 bg-stone-50 p-2 rounded-xl border border-stone-200">
-        <div className="flex items-center gap-2">
-          <span className="text-stone-700">📍 新增至地區：</span>
-          <select
-            value={selectedCityOverride || (activeCity !== 'ALL' ? activeCity : '')}
-            onChange={(e) => setSelectedCityOverride(e.target.value)}
-            className="rounded-lg border border-stone-300 bg-white px-2.5 py-1 text-sm font-extrabold text-stone-900 focus:outline-none cursor-pointer"
-          >
-            <option value="">🌐 智慧自動辨識（依網址／文案）</option>
-            {ALL_AVAILABLE_CITIES.map((c) => (
-              <option key={c} value={c}>
-                📍 {c}
-              </option>
-            ))}
-          </select>
-        </div>
-        <span className="text-xs text-stone-500 font-normal hidden sm:inline">
-          💡 貼上任何 Google Maps 連結，系統會自動歸類到該縣市並建立標籤
+      {/* 指定新增地區／智慧辨識（防折行、防溢出） */}
+      <div className="flex items-center gap-2 rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-sm font-bold text-stone-700 w-full overflow-hidden">
+        <span className="shrink-0 text-xs sm:text-sm font-black text-stone-700 whitespace-nowrap">
+          📍 地區：
         </span>
+        <select
+          value={selectedCityOverride || (activeCity !== 'ALL' ? activeCity : '')}
+          onChange={(e) => setSelectedCityOverride(e.target.value)}
+          className="w-full min-w-0 flex-1 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs sm:text-sm font-extrabold text-stone-900 focus:border-amber-600 focus:outline-none cursor-pointer truncate"
+        >
+          <option value="">🌐 自動辨識（依網址／店名）</option>
+          {ALL_AVAILABLE_CITIES.map((c) => (
+            <option key={c} value={c}>
+              📍 {c}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Main Large Input Box */}
