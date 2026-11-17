@@ -1,0 +1,6 @@
+[user]
+	name = andrewdu0805
+	email = 253186862+andrewdu0805@users.noreply.github.com
+[credential "https://github.com"]
+	helper = 
+	helper = !'/opt/antigravity/plugins/github/skills/github/scripts/gh' auth git-credential
