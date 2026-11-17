@@ -12,7 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
-import { QUICK_ADD_DEMO_PRESETS } from '@/lib/default-data';
+import { ALL_AVAILABLE_CITIES, QUICK_ADD_DEMO_PRESETS } from '@/lib/default-data';
 import { extractRegionFromAddress } from '@/lib/geo-utils';
 import { SavedPlace, VisitStatus } from '@/types/place';
 
@@ -31,6 +31,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
   } = usePlaces();
 
   const [inputText, setInputText] = useState('');
+  const [selectedCityOverride, setSelectedCityOverride] = useState<string>('');
   const [isParsing, setIsParsing] = useState(false);
   const [showFileImport, setShowFileImport] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -44,7 +45,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
     setErrorMsg(null);
     try {
       const targetCity =
-        activeCity === 'ALL' ? '' : activeCity;
+        selectedCityOverride || (activeCity === 'ALL' ? '' : activeCity);
       const res = await fetch('/api/smart-parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -256,6 +257,28 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
             匯入
           </button>
         </div>
+      </div>
+
+      {/* 指定新增地區／智慧辨識 */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-bold text-stone-600 bg-stone-50 p-2 rounded-xl border border-stone-200">
+        <div className="flex items-center gap-2">
+          <span className="text-stone-700">📍 新增至地區：</span>
+          <select
+            value={selectedCityOverride || (activeCity !== 'ALL' ? activeCity : '')}
+            onChange={(e) => setSelectedCityOverride(e.target.value)}
+            className="rounded-lg border border-stone-300 bg-white px-2.5 py-1 text-sm font-extrabold text-stone-900 focus:outline-none cursor-pointer"
+          >
+            <option value="">🌐 智慧自動辨識（依網址／文案）</option>
+            {ALL_AVAILABLE_CITIES.map((c) => (
+              <option key={c} value={c}>
+                📍 {c}
+              </option>
+            ))}
+          </select>
+        </div>
+        <span className="text-xs text-stone-500 font-normal hidden sm:inline">
+          💡 貼上任何 Google Maps 連結，系統會自動歸類到該縣市並建立標籤
+        </span>
       </div>
 
       {/* Main Large Input Box */}

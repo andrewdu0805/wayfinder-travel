@@ -9,6 +9,7 @@ import {
   Search,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
+import { ALL_AVAILABLE_CITIES } from '@/lib/default-data';
 import { VisitStatus } from '@/types/place';
 import { SmartQuickAddBar } from './SmartQuickAddBar';
 import { PlaceCard } from './PlaceCard';
@@ -134,6 +135,69 @@ export function PlacesManagerView({
                 {grp.city} ({grp.count})
               </button>
             ))}
+
+            {/* 若當前選擇的城市不在現有卡片群中（新切換的城市），顯示該城市的專屬標籤 */}
+            {selectedCity !== 'ALL' &&
+              !cityGroups.some((g) => g.city === selectedCity) && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCity(selectedCity)}
+                  className="rounded-xl px-4 py-2 text-base font-extrabold bg-stone-900 text-white shadow-xs cursor-pointer"
+                >
+                  📍 {selectedCity} (0)
+                </button>
+              )}
+
+            {/* 一鍵切換全台其他縣市與海外旅遊城市 */}
+            <select
+              aria-label="選擇其他縣市或地區"
+              value={selectedCity !== 'ALL' ? selectedCity : ''}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setSelectedCity(e.target.value);
+                }
+              }}
+              className="rounded-xl border-2 border-dashed border-teal-300 bg-teal-50/70 px-3 py-2 text-sm sm:text-base font-extrabold text-teal-900 hover:bg-teal-100/70 focus:outline-none cursor-pointer"
+            >
+              <option value="">＋ 切換／加入其他縣市...</option>
+              <optgroup label="台灣北部">
+                <option value="台北市">台北市</option>
+                <option value="新北市">新北市</option>
+                <option value="基隆市">基隆市</option>
+                <option value="桃園市">桃園市</option>
+                <option value="新竹市">新竹市</option>
+                <option value="新竹縣">新竹縣</option>
+                <option value="宜蘭縣">宜蘭縣</option>
+              </optgroup>
+              <optgroup label="台灣中部">
+                <option value="台中市">台中市</option>
+                <option value="苗栗縣">苗栗縣</option>
+                <option value="彰化縣">彰化縣</option>
+                <option value="南投縣">南投縣</option>
+                <option value="雲林縣">雲林縣</option>
+              </optgroup>
+              <optgroup label="台灣南部">
+                <option value="台南市">台南市</option>
+                <option value="高雄市">高雄市</option>
+                <option value="嘉義市">嘉義市</option>
+                <option value="嘉義縣">嘉義縣</option>
+                <option value="屏東縣">屏東縣</option>
+              </optgroup>
+              <optgroup label="台灣東部與離島">
+                <option value="花蓮縣">花蓮縣</option>
+                <option value="台東縣">台東縣</option>
+                <option value="澎湖縣">澎湖縣</option>
+                <option value="金門縣">金門縣</option>
+              </optgroup>
+              <optgroup label="日本與海外">
+                <option value="東京都">東京都</option>
+                <option value="京都府">京都府</option>
+                <option value="大阪府">大阪府</option>
+                <option value="北海道">北海道</option>
+                <option value="福岡縣">福岡縣</option>
+                <option value="沖繩縣">沖繩縣</option>
+              </optgroup>
+            </select>
           </div>
 
           <button
@@ -229,12 +293,16 @@ export function PlacesManagerView({
 
       {/* 地點卡片清單（大字雙欄排版，手機單欄、平板電腦雙欄） */}
       {filteredPlaces.length === 0 ? (
-        <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-white p-12 text-center space-y-2">
-          <p className="text-lg font-extrabold text-stone-700">
-            沒有符合目前篩選條件的地點
+        <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-white p-10 sm:p-14 text-center space-y-3">
+          <p className="text-xl font-extrabold text-stone-800">
+            {selectedCity !== 'ALL'
+              ? `目前「${selectedCity}」還沒有收藏地點`
+              : '沒有符合目前篩選條件的地點'}
           </p>
-          <p className="text-base text-stone-500">
-            請切換上方「地區／分類」按鈕，或在最上方新增店家
+          <p className="text-base font-medium text-stone-600 max-w-md mx-auto">
+            {selectedCity !== 'ALL'
+              ? `💡 只要在最上方輸入店名或貼上 Google Maps 網址，系統就會自動將新景點收錄至「${selectedCity}」！`
+              : '請切換上方「地區／分類」按鈕，或在最上方新增店家'}
           </p>
         </div>
       ) : (

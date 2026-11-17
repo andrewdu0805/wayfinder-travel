@@ -585,36 +585,23 @@ export async function POST(req: NextRequest) {
       travelMode = 'TRANSIT';
     }
 
-    // 2. Natural language destination detection
-    let targetCity = '高雄市';
-    if (/高雄|鹽埕|駁二|哈瑪星/.test(intentText)) {
-      targetCity = '高雄市';
-      origin = {
-        name: PRESET_DESTINATIONS[0].label,
-        latitude: PRESET_DESTINATIONS[0].latitude,
-        longitude: PRESET_DESTINATIONS[0].longitude,
-      };
-    } else if (/台南|臺南|中西區|安平/.test(intentText)) {
-      targetCity = '台南市';
-      origin = {
-        name: PRESET_DESTINATIONS[1].label,
-        latitude: PRESET_DESTINATIONS[1].latitude,
-        longitude: PRESET_DESTINATIONS[1].longitude,
-      };
-    } else if (/台北|大稻埕|迪化街/.test(intentText)) {
-      targetCity = '台北市';
-      origin = {
-        name: PRESET_DESTINATIONS[2].label,
-        latitude: PRESET_DESTINATIONS[2].latitude,
-        longitude: PRESET_DESTINATIONS[2].longitude,
-      };
-    } else if (/東京|淺草|雷門/.test(intentText)) {
-      targetCity = '東京都';
-      origin = {
-        name: PRESET_DESTINATIONS[3].label,
-        latitude: PRESET_DESTINATIONS[3].latitude,
-        longitude: PRESET_DESTINATIONS[3].longitude,
-      };
+    // 2. Natural language destination detection across all preset cities
+    let targetCity = body.origin?.city || '台南市';
+    for (const dest of PRESET_DESTINATIONS) {
+      const cityClean = dest.city.replace('市', '').replace('縣', '').replace('府', '');
+      const distClean = dest.district.replace('區', '').replace('鄉', '').replace('鎮', '');
+      const regex = new RegExp(`${dest.city}|${cityClean}|${dest.district}|${distClean}`);
+      if (regex.test(intentText)) {
+        targetCity = dest.city;
+        if (!body.origin || !body.origin.latitude) {
+          origin = {
+            name: dest.label,
+            latitude: dest.latitude,
+            longitude: dest.longitude,
+          };
+        }
+        break;
+      }
     }
 
     // 3. Extract Overnight Hotel / End-Anchor if mentioned (e.g. "今天晚上住在台南大飯店")

@@ -150,51 +150,21 @@ export function ItineraryPlannerView() {
       const textToUse = opts?.overrideText ?? intentText;
       let targetOrigin = opts?.overrideOrigin || origin;
 
-      // Auto-detect city from prompt text
+      // Auto-detect city from prompt text across all presets
       if (!opts?.overrideOrigin) {
-        if (/高雄|鹽埕|駁二|鴨肉珍/.test(textToUse)) {
-          const kh = PRESET_DESTINATIONS.find((d) => d.city === '高雄市');
-          if (kh) {
+        for (const dest of PRESET_DESTINATIONS) {
+          const cityClean = dest.city.replace('市', '').replace('縣', '').replace('府', '');
+          const distClean = dest.district.replace('區', '').replace('鄉', '').replace('鎮', '');
+          const regex = new RegExp(`${dest.city}|${cityClean}|${dest.district}|${distClean}`);
+          if (regex.test(textToUse)) {
             targetOrigin = {
-              name: kh.label,
-              latitude: kh.latitude,
-              longitude: kh.longitude,
+              name: dest.label,
+              latitude: dest.latitude,
+              longitude: dest.longitude,
             };
-            setSelectedPresetId(kh.id);
+            setSelectedPresetId(dest.id);
             setOrigin(targetOrigin);
-          }
-        } else if (/台南|臺南|中西區|安平/.test(textToUse)) {
-          const tn = PRESET_DESTINATIONS.find((d) => d.city === '台南市');
-          if (tn) {
-            targetOrigin = {
-              name: tn.label,
-              latitude: tn.latitude,
-              longitude: tn.longitude,
-            };
-            setSelectedPresetId(tn.id);
-            setOrigin(targetOrigin);
-          }
-        } else if (/台北|大稻埕|迪化街/.test(textToUse)) {
-          const tp = PRESET_DESTINATIONS.find((d) => d.city === '台北市');
-          if (tp) {
-            targetOrigin = {
-              name: tp.label,
-              latitude: tp.latitude,
-              longitude: tp.longitude,
-            };
-            setSelectedPresetId(tp.id);
-            setOrigin(targetOrigin);
-          }
-        } else if (/東京|淺草|雷門/.test(textToUse)) {
-          const tyo = PRESET_DESTINATIONS.find((d) => d.city === '東京都');
-          if (tyo) {
-            targetOrigin = {
-              name: tyo.label,
-              latitude: tyo.latitude,
-              longitude: tyo.longitude,
-            };
-            setSelectedPresetId(tyo.id);
-            setOrigin(targetOrigin);
+            break;
           }
         }
       }
@@ -631,9 +601,13 @@ export function ItineraryPlannerView() {
             <div className="lg:col-span-5 lg:sticky lg:top-36">
               <RouteVisualizerMap
                 origin={activePlan.origin}
-                candidates={places.filter(
-                  (p) => p.city === PRESET_DESTINATIONS.find((d) => d.id === selectedPresetId)?.city
-                )}
+                candidates={places.filter((p) => {
+                  const selCity =
+                    PRESET_DESTINATIONS.find((d) => d.id === selectedPresetId)?.city ||
+                    activePlan.stops[0]?.place.city;
+                  if (!selCity) return true;
+                  return p.city === selCity;
+                })}
                 activePlan={activePlan}
               />
             </div>
