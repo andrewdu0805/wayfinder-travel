@@ -52,6 +52,7 @@ interface PlacesContextValue {
   updateCategoryConfig: (id: string, patch: Partial<CategoryConfig>) => void;
   deleteCategoryConfig: (id: string) => void;
   updateSettings: (patch: Partial<AppSettings>) => void;
+  importSettingsCode: (codeOrUrl: string) => boolean;
   refreshPlacesHours: (targetPlaces: SavedPlace[]) => Promise<number>;
   syncWithSupabase: () => Promise<{ ok: boolean; message: string }>;
   resetToDemoData: () => void;
@@ -111,6 +112,59 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
             process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
             '',
         }));
+      }
+
+      // Check for sync_keys in URL (e.g. from scanning PC QR code)
+      if (typeof window !== 'undefined') {
+        try {
+          const urlParams = new URLSearchParams(window.location.search);
+          const syncKeysParam = urlParams.get('sync_keys');
+          if (syncKeysParam) {
+            let jsonStr = '';
+            try {
+              jsonStr = decodeURIComponent(atob(syncKeysParam));
+            } catch {
+              jsonStr = decodeURIComponent(syncKeysParam);
+            }
+            const synced = JSON.parse(jsonStr);
+            if (synced && typeof synced === 'object') {
+              setSettings((prev) => {
+                const updated = {
+                  ...prev,
+                  ...(synced.googleMapsApiKey
+                    ? { googleMapsApiKey: String(synced.googleMapsApiKey).trim() }
+                    : {}),
+                  ...(synced.geminiApiKey
+                    ? { geminiApiKey: String(synced.geminiApiKey).trim() }
+                    : {}),
+                  ...(synced.supabaseUrl
+                    ? { supabaseUrl: String(synced.supabaseUrl).trim() }
+                    : {}),
+                  ...(synced.supabaseAnonKey
+                    ? { supabaseAnonKey: String(synced.supabaseAnonKey).trim() }
+                    : {}),
+                };
+                try {
+                  localStorage.setItem(
+                    STORAGE_KEYS.SETTINGS,
+                    JSON.stringify(updated)
+                  );
+                } catch {}
+                return updated;
+              });
+              setLastSyncMessage('🎉 已成功從電腦同步 API 金鑰至此裝置！');
+              urlParams.delete('sync_keys');
+              const newSearch = urlParams.toString();
+              const newUrl =
+                window.location.pathname +
+                (newSearch ? `?${newSearch}` : '') +
+                window.location.hash;
+              window.history.replaceState({}, document.title, newUrl);
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to parse sync_keys from URL:', err);
+        }
       }
     } catch (e) {
       console.warn('Failed to hydrate state from localStorage:', e);
@@ -352,6 +406,59 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
     setSettings((prev) => ({ ...prev, ...patch }));
   }, []);
 
+  const importSettingsCode = useCallback((codeOrUrl: string): boolean => {
+    try {
+      let raw = codeOrUrl.trim();
+      if (raw.includes('sync_keys=')) {
+        try {
+          const u = new URL(raw, 'https://dummy.local');
+          raw = u.searchParams.get('sync_keys') || raw;
+        } catch {
+          const m = raw.match(/sync_keys=([^&#\s]+)/);
+          if (m) raw = m[1];
+        }
+      }
+      let jsonStr = '';
+      try {
+        jsonStr = decodeURIComponent(atob(raw));
+      } catch {
+        jsonStr = decodeURIComponent(raw);
+      }
+      const synced = JSON.parse(jsonStr);
+      if (synced && typeof synced === 'object') {
+        setSettings((prev) => {
+          const updated = {
+            ...prev,
+            ...(synced.googleMapsApiKey
+              ? { googleMapsApiKey: String(synced.googleMapsApiKey).trim() }
+              : {}),
+            ...(synced.geminiApiKey
+              ? { geminiApiKey: String(synced.geminiApiKey).trim() }
+              : {}),
+            ...(synced.supabaseUrl
+              ? { supabaseUrl: String(synced.supabaseUrl).trim() }
+              : {}),
+            ...(synced.supabaseAnonKey
+              ? { supabaseAnonKey: String(synced.supabaseAnonKey).trim() }
+              : {}),
+          };
+          try {
+            localStorage.setItem(
+              STORAGE_KEYS.SETTINGS,
+              JSON.stringify(updated)
+            );
+          } catch {}
+          return updated;
+        });
+        setLastSyncMessage('🎉 成功匯入金鑰設定！Google Maps 與 Gemini 已就緒。');
+        return true;
+      }
+    } catch (e) {
+      console.warn('Failed to import settings code:', e);
+    }
+    return false;
+  }, []);
+
   const refreshPlacesHours = useCallback(
     async (targetPlaces: SavedPlace[]): Promise<number> => {
       if (targetPlaces.length === 0) return 0;
@@ -476,6 +583,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       updateCategoryConfig,
       deleteCategoryConfig,
       updateSettings,
+      importSettingsCode,
       refreshPlacesHours,
       syncWithSupabase,
       resetToDemoData,
@@ -496,6 +604,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       updateCategoryConfig,
       deleteCategoryConfig,
       updateSettings,
+      importSettingsCode,
       refreshPlacesHours,
       syncWithSupabase,
       resetToDemoData,
