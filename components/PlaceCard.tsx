@@ -7,7 +7,6 @@ import {
   MapPin,
   Plus,
   RefreshCw,
-  Star,
   Trash2,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
@@ -41,118 +40,108 @@ export function PlaceCard({ place }: PlaceCardProps) {
     <>
       <article
         id={`place-card-${place.id}`}
-        className={`rounded-2xl border-2 p-5 transition-all flex flex-col justify-between gap-4 ${
+        className={`rounded-2xl border-2 p-3.5 sm:p-4 transition-all flex flex-col justify-between gap-3 ${
           place.visit_status === 'visited_skip'
             ? 'border-stone-200 bg-stone-100/80 opacity-75'
             : 'border-stone-200 bg-white hover:border-stone-300 shadow-xs'
         }`}
       >
-        <div className="space-y-3">
-          {/* 第一排：地區 ＋ 地圖按鈕（在地區右側） ＋ 分類選單 ＋ 評分 ＋ 刪除 */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-xl bg-stone-100 px-3 py-1.5 text-sm sm:text-base font-extrabold text-stone-700">
-                <MapPin className="h-4 w-4 text-amber-700" />
-                {place.city}・{place.district}
-              </span>
+        <div className="space-y-2.5">
+          {/* 第 1 排：地區 ＋ 地圖按鈕（左右對齊） */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1 rounded-xl bg-stone-100 px-2.5 py-1 text-xs sm:text-sm font-extrabold text-stone-700 shrink-0">
+              <MapPin className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+              {place.city}・{place.district}
+            </span>
 
-              {/* 地圖按鈕：直接放在地區的右側，不佔用店名空間 */}
-              <a
-                href={place.google_maps_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 rounded-xl border border-teal-300 bg-teal-50 px-3 py-1.5 text-sm sm:text-base font-extrabold text-teal-800 hover:bg-teal-100 transition-colors"
-              >
-                🗺️ 地圖
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {/* 分類切換下拉選單 */}
-              <select
-                aria-label={`${place.name} 分類切換`}
-                value={place.sub_category}
-                onChange={(e) => {
-                  const nextSub = e.target.value;
-                  const cfg = categoryConfigs.find(
-                    (c) => c.sub_category === nextSub
-                  );
-                  if (cfg) {
-                    updatePlaceInline(place.id, {
-                      primary_category: cfg.primary_category,
-                      sub_category: cfg.sub_category,
-                      estimated_stay_mins: cfg.default_stay_mins,
-                    });
-                  }
-                }}
-                className="rounded-xl border-2 border-amber-300 bg-amber-50 px-2.5 py-1.5 text-sm sm:text-base font-extrabold text-amber-950 hover:bg-amber-100 focus:outline-none cursor-pointer"
-              >
-                {categoryConfigs.map((cfg) => (
-                  <option key={cfg.id} value={cfg.sub_category}>
-                    🏷️ {cfg.sub_label}
-                  </option>
-                ))}
-                {!matchedConfig && (
-                  <option value={place.sub_category}>
-                    🏷️ {place.sub_category}
-                  </option>
-                )}
-              </select>
-
-              {place.rating && (
-                <span className="inline-flex items-center gap-1 text-sm sm:text-base font-extrabold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg">
-                  <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
-                  {place.rating}
-                </span>
-              )}
-
-              {/* 刪除按鈕（包含確認對話框） */}
-              <button
-                type="button"
-                title="刪除此收藏地點"
-                onClick={() => {
-                  if (confirm(`確定要刪除「${place.name}」嗎？`)) {
-                    deletePlace(place.id);
-                  }
-                }}
-                className="inline-flex items-center gap-1 rounded-xl border border-red-200 bg-red-50 px-2.5 py-1.5 text-sm font-extrabold text-red-600 hover:bg-red-100 transition-colors cursor-pointer"
-              >
-                <Trash2 className="h-4 w-4" />
-                刪除
-              </button>
-            </div>
+            {/* 地圖按鈕：直接放在地區同列右側 */}
+            <a
+              href={place.google_maps_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-xl border border-teal-300 bg-teal-50 px-2.5 py-1 text-xs sm:text-sm font-extrabold text-teal-800 hover:bg-teal-100 transition-colors shrink-0"
+            >
+              🗺️ 地圖
+              <ExternalLink className="h-3 w-3" />
+            </a>
           </div>
 
-          {/* 第二排：地點名稱（單獨一行、完整 100% 寬度不折疊） */}
-          <div className="w-full pt-1">
-            <h3 className="text-xl sm:text-2xl font-extrabold text-stone-900 leading-snug break-words">
+          {/* 第 2 排：分類選單（左） ＋ 刪除鍵（右，移到原本星星的位置，空間利用最好！） */}
+          <div className="flex items-center justify-between gap-2">
+            {/* 分類切換下拉選單 */}
+            <select
+              aria-label={`${place.name} 分類切換`}
+              value={place.sub_category}
+              onChange={(e) => {
+                const nextSub = e.target.value;
+                const cfg = categoryConfigs.find(
+                  (c) => c.sub_category === nextSub
+                );
+                if (cfg) {
+                  updatePlaceInline(place.id, {
+                    primary_category: cfg.primary_category,
+                    sub_category: cfg.sub_category,
+                    estimated_stay_mins: cfg.default_stay_mins,
+                  });
+                }
+              }}
+              className="flex-1 min-w-0 max-w-[210px] sm:max-w-xs rounded-xl border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs sm:text-sm font-extrabold text-amber-950 hover:bg-amber-100 focus:outline-none cursor-pointer truncate"
+            >
+              {categoryConfigs.map((cfg) => (
+                <option key={cfg.id} value={cfg.sub_category}>
+                  🏷️ {cfg.sub_label}
+                </option>
+              ))}
+              {!matchedConfig && (
+                <option value={place.sub_category}>
+                  🏷️ {place.sub_category}
+                </option>
+              )}
+            </select>
+
+            {/* 刪除按鈕：移到原評價星星的位置，不佔獨立列！ */}
+            <button
+              type="button"
+              title="刪除此收藏地點"
+              onClick={() => {
+                if (confirm(`確定要刪除「${place.name}」嗎？`)) {
+                  deletePlace(place.id);
+                }
+              }}
+              className="shrink-0 inline-flex items-center gap-1 rounded-xl border border-red-200 bg-red-50 px-2.5 py-1 text-xs sm:text-sm font-extrabold text-red-600 hover:bg-red-100 transition-colors cursor-pointer"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              刪除
+            </button>
+          </div>
+
+          {/* 第 3 排：地點名稱（單獨一行、完整 100% 寬度不折疊） */}
+          <div className="w-full pt-0.5">
+            <h3 className="text-lg sm:text-xl font-black text-stone-900 leading-snug break-words">
               {place.name}
             </h3>
           </div>
 
-          {/* 第三排：點擊彈出說明框按鈕 ＋ 停留時間與營業時間 */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-stone-100">
+          {/* 第 4 排：說明／備註按鈕 ＋ 停留時間與營業時間（單行對齊不折行） */}
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-stone-100">
             <button
               type="button"
               onClick={() => {
                 setNoteDraft(place.user_notes || '');
                 setIsNoteModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 text-sm sm:text-base font-extrabold text-amber-950 transition-colors cursor-pointer"
+              className="min-w-0 shrink inline-flex items-center gap-1 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 text-xs sm:text-sm font-extrabold text-amber-950 transition-colors cursor-pointer truncate"
             >
-              📝 說明／備註
+              <span className="shrink-0">📝 說明／備註</span>
               {place.user_notes ? (
-                <span className="max-w-[150px] sm:max-w-[220px] truncate text-xs sm:text-sm font-normal text-amber-800">
+                <span className="truncate max-w-[90px] sm:max-w-[180px] font-normal text-amber-800">
                   ({place.user_notes})
                 </span>
-              ) : (
-                <span className="text-xs font-normal text-stone-400">（點擊填寫）</span>
-              )}
+              ) : null}
             </button>
 
-            <span className="text-xs sm:text-sm font-bold text-stone-500">
-              ⏱️ {place.estimated_stay_mins} 分鐘 ｜ {hoursText}
+            <span className="shrink-0 text-xs sm:text-sm font-bold text-stone-500 whitespace-nowrap">
+              ⏱️ {place.estimated_stay_mins}分 ｜ {hoursText}
             </span>
           </div>
         </div>

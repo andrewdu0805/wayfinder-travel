@@ -118,18 +118,18 @@ export function PlacesManagerView({
       <SmartQuickAddBar activeCity={selectedCity} />
 
       {/* 獨立分類篩選面板（大字體、一目了然） */}
-      <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-5">
+      <section className="rounded-2xl border border-stone-200 bg-white p-3.5 sm:p-5 shadow-xs space-y-3.5 sm:space-y-4">
         {/* 第一排：城市／地區選擇 */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-stone-100">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-stone-100">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-base font-extrabold text-stone-700 mr-1">
-              <Globe2 className="h-5 w-5 text-teal-700" />
+            <span className="inline-flex items-center gap-1.5 text-sm sm:text-base font-extrabold text-stone-700 mr-1">
+              <Globe2 className="h-4 w-4 sm:h-5 sm:w-5 text-teal-700" />
               📍 地區：
             </span>
             <button
               type="button"
               onClick={() => handleSelectCity('ALL')}
-              className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
+              className={`rounded-xl px-3 sm:px-4 py-1.5 sm:py-2 text-sm sm:text-base font-extrabold transition-all cursor-pointer ${
                 selectedCity === 'ALL'
                   ? 'bg-stone-900 text-white shadow-xs'
                   : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
