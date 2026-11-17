@@ -227,34 +227,34 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
       id="smart-quick-add-section"
       className="rounded-2xl border border-stone-200 bg-white p-3.5 sm:p-5 shadow-xs space-y-3"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-amber-600/10 text-amber-700">
-            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5" />
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="inline-flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg bg-amber-600/10 text-amber-700 shrink-0">
+            <Sparkles className="h-4 w-4 text-amber-600" />
           </span>
-          <h2 className="text-base sm:text-xl font-black text-stone-900">
-            ➕ 快速新增地點
+          <h2 className="text-base sm:text-lg font-black text-stone-900 whitespace-nowrap">
+            ➕ 新增
           </h2>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             id="btn-paste-clipboard"
             type="button"
             onClick={handlePasteClipboard}
-            className="inline-flex items-center gap-1 rounded-xl border border-stone-300 bg-stone-50 px-2.5 sm:px-3.5 py-1.5 text-xs sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 rounded-xl border border-stone-300 bg-stone-50 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-extrabold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer whitespace-nowrap"
           >
-            <ClipboardPaste className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-700" />
-            貼上剪貼簿
+            <ClipboardPaste className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+            <span>貼上剪貼簿</span>
           </button>
           <button
             id="btn-toggle-takeout-import"
             type="button"
             onClick={() => setShowFileImport((v) => !v)}
-            className="inline-flex items-center gap-1 rounded-xl border border-stone-300 bg-stone-50 px-2.5 sm:px-3.5 py-1.5 text-xs sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 rounded-xl border border-stone-300 bg-stone-50 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-extrabold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer whitespace-nowrap"
           >
-            <FileUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-teal-700" />
-            匯入
+            <FileUp className="h-3.5 w-3.5 text-teal-700 shrink-0" />
+            <span>匯入</span>
           </button>
         </div>
       </div>
