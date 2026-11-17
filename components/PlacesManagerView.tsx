@@ -6,6 +6,7 @@ import {
   FolderCog,
   Globe2,
   RefreshCw,
+  RotateCcw,
   Search,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
@@ -36,6 +37,21 @@ export function PlacesManagerView({
     'ALL' | VisitStatus
   >('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Places belonging to the currently selected city (or all)
+  const placesInSelectedCity = useMemo(() => {
+    return selectedCity === 'ALL'
+      ? places
+      : places.filter((p) => p.city === selectedCity);
+  }, [places, selectedCity]);
+
+  // Handle city selection with automatic sub-filter reset
+  const handleSelectCity = (newCity: string) => {
+    setSelectedCity(newCity);
+    setSelectedSubCategory('ALL');
+    setSelectedVisitStatus('ALL');
+    setSearchQuery('');
+  };
 
   // Automatically aggregate cities & counts from saved places
   const cityGroups = useMemo(() => {
@@ -112,7 +128,7 @@ export function PlacesManagerView({
             </span>
             <button
               type="button"
-              onClick={() => setSelectedCity('ALL')}
+              onClick={() => handleSelectCity('ALL')}
               className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
                 selectedCity === 'ALL'
                   ? 'bg-stone-900 text-white shadow-xs'
@@ -125,7 +141,7 @@ export function PlacesManagerView({
               <button
                 key={grp.city}
                 type="button"
-                onClick={() => setSelectedCity(grp.city)}
+                onClick={() => handleSelectCity(grp.city)}
                 className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
                   selectedCity === grp.city
                     ? 'bg-stone-900 text-white shadow-xs'
@@ -141,7 +157,7 @@ export function PlacesManagerView({
               !cityGroups.some((g) => g.city === selectedCity) && (
                 <button
                   type="button"
-                  onClick={() => setSelectedCity(selectedCity)}
+                  onClick={() => handleSelectCity(selectedCity)}
                   className="rounded-xl px-4 py-2 text-base font-extrabold bg-stone-900 text-white shadow-xs cursor-pointer"
                 >
                   📍 {selectedCity} (0)
@@ -154,7 +170,7 @@ export function PlacesManagerView({
               value={selectedCity !== 'ALL' ? selectedCity : ''}
               onChange={(e) => {
                 if (e.target.value) {
-                  setSelectedCity(e.target.value);
+                  handleSelectCity(e.target.value);
                 }
               }}
               className="rounded-xl border-2 border-dashed border-teal-300 bg-teal-50/70 px-3 py-2 text-sm sm:text-base font-extrabold text-teal-900 hover:bg-teal-100/70 focus:outline-none cursor-pointer"
@@ -226,13 +242,11 @@ export function PlacesManagerView({
                 : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
             }`}
           >
-            全部分類
+            全部分類 ({placesInSelectedCity.length})
           </button>
           {categoryConfigs.map((cfg) => {
-            const count = places.filter(
-              (p) =>
-                (selectedCity === 'ALL' || p.city === selectedCity) &&
-                p.sub_category === cfg.sub_category
+            const count = placesInSelectedCity.filter(
+              (p) => p.sub_category === cfg.sub_category
             ).length;
             if (count === 0 && selectedSubCategory !== cfg.sub_category) return null;
             return (
@@ -262,20 +276,28 @@ export function PlacesManagerView({
                 { key: 'visited_revisit', label: '❤️ 想再去' },
                 { key: 'visited_skip', label: '🚫 不推薦' },
               ] as Array<{ key: 'ALL' | VisitStatus; label: string }>
-            ).map((st) => (
-              <button
-                key={st.key}
-                type="button"
-                onClick={() => setSelectedVisitStatus(st.key)}
-                className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
-                  selectedVisitStatus === st.key
-                    ? 'bg-teal-700 text-white shadow-xs'
-                    : 'border border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100'
-                }`}
-              >
-                {st.label}
-              </button>
-            ))}
+            ).map((st) => {
+              const count =
+                st.key === 'ALL'
+                  ? placesInSelectedCity.length
+                  : placesInSelectedCity.filter(
+                      (p) => p.visit_status === st.key
+                    ).length;
+              return (
+                <button
+                  key={st.key}
+                  type="button"
+                  onClick={() => setSelectedVisitStatus(st.key)}
+                  className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
+                    selectedVisitStatus === st.key
+                      ? 'bg-teal-700 text-white shadow-xs'
+                      : 'border border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100'
+                  }`}
+                >
+                  {st.label} ({count})
+                </button>
+              );
+            })}
           </div>
 
           <div className="relative w-full sm:w-80">
@@ -293,17 +315,49 @@ export function PlacesManagerView({
 
       {/* 地點卡片清單（大字雙欄排版，手機單欄、平板電腦雙欄） */}
       {filteredPlaces.length === 0 ? (
-        <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-white p-10 sm:p-14 text-center space-y-3">
-          <p className="text-xl font-extrabold text-stone-800">
-            {selectedCity !== 'ALL'
-              ? `目前「${selectedCity}」還沒有收藏地點`
-              : '沒有符合目前篩選條件的地點'}
-          </p>
-          <p className="text-base font-medium text-stone-600 max-w-md mx-auto">
-            {selectedCity !== 'ALL'
-              ? `💡 只要在最上方輸入店名或貼上 Google Maps 網址，系統就會自動將新景點收錄至「${selectedCity}」！`
-              : '請切換上方「地區／分類」按鈕，或在最上方新增店家'}
-          </p>
+        <div className="rounded-2xl border-2 border-dashed border-stone-300 bg-white p-8 sm:p-12 text-center space-y-4">
+          {placesInSelectedCity.length > 0 ? (
+            <>
+              <div className="text-4xl">🔍</div>
+              <p className="text-xl font-extrabold text-stone-900">
+                {selectedCity !== 'ALL' ? `「${selectedCity}」` : ''}
+                目前篩選條件下沒有符合的地點
+              </p>
+              <p className="text-base font-medium text-stone-600 max-w-md mx-auto">
+                {selectedCity !== 'ALL'
+                  ? `「${selectedCity}」目前共有 ${placesInSelectedCity.length} 筆收藏地點，但已被目前的「分類」或「狀態」篩選隱藏。`
+                  : `清單中共有 ${places.length} 筆地點，但已被目前的篩選條件隱藏。`}
+              </p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedSubCategory('ALL');
+                    setSelectedVisitStatus('ALL');
+                    setSearchQuery('');
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-base font-extrabold text-white shadow-xs hover:bg-amber-700 transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  重設篩選條件（顯示全部 {placesInSelectedCity.length} 筆地點）
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-4xl">📍</div>
+              <p className="text-xl font-extrabold text-stone-900">
+                {selectedCity !== 'ALL'
+                  ? `目前「${selectedCity}」尚未收藏任何地點`
+                  : '尚未收藏任何地點'}
+              </p>
+              <p className="text-base font-medium text-stone-600 max-w-md mx-auto">
+                {selectedCity !== 'ALL'
+                  ? `💡 只要在最上方輸入店名或貼上 Google Maps 網址，系統就會自動收錄至「${selectedCity}」！`
+                  : '在上方輸入店名或貼上 Google Maps 網址即可開始收藏'}
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
