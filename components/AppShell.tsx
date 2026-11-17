@@ -67,17 +67,17 @@ export function AppShell({ initialTab = 'places' }: AppShellProps) {
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-stone-900 flex flex-col">
-      {/* Top Navigation Header — Clean, Large Font, 2 Independent Sections */}
+      {/* Top Navigation Header — High space efficiency on mobile, Clean Large Font */}
       <header className="sticky top-0 z-30 border-b border-stone-200 bg-white/95 backdrop-blur-md shadow-xs">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-3 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-stone-900 text-amber-400 shadow-xs">
-                <Compass className="h-6 w-6" />
+        <div className="mx-auto max-w-6xl px-3 sm:px-6 py-2 sm:py-3 space-y-2 sm:space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-xl sm:rounded-2xl bg-stone-900 text-amber-400 shadow-xs">
+                <Compass className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
               <div>
-                <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-stone-900">
-                  Wayfinder 順路旅遊助手
+                <h1 className="text-lg sm:text-2xl font-black tracking-tight text-stone-900 leading-tight">
+                  Wayfinder 順路導航
                 </h1>
               </div>
             </div>
@@ -86,41 +86,41 @@ export function AppShell({ initialTab = 'places' }: AppShellProps) {
               id="btn-header-settings"
               type="button"
               onClick={() => setIsSettingsOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-stone-300 bg-stone-50 px-3.5 py-2 text-sm sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-50 px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-base font-extrabold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
             >
-              <Settings className="h-5 w-5 text-stone-600" />
+              <Settings className="h-4 w-4 sm:h-5 sm:w-5 text-stone-600" />
               <span>分類設定</span>
             </button>
           </div>
 
-          {/* 兩大獨立功能區塊切換（大字體、大按鈕） */}
-          <div className="grid grid-cols-2 gap-2.5 rounded-2xl bg-stone-100 p-1.5 border border-stone-200">
+          {/* 兩大獨立功能區塊切換（精簡高度、防折行、好按大字） */}
+          <div className="grid grid-cols-2 gap-1.5 rounded-xl bg-stone-100 p-1 border border-stone-200">
             <button
               id="nav-tab-places"
               type="button"
               onClick={() => setActiveTab('places')}
-              className={`flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-base sm:text-lg font-extrabold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 rounded-lg py-2 sm:py-2.5 px-2 text-sm sm:text-base font-black transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'places'
-                  ? 'bg-stone-900 text-white shadow-sm'
+                  ? 'bg-stone-900 text-white shadow-xs'
                   : 'text-stone-600 hover:text-stone-900 hover:bg-white/60'
               }`}
             >
-              <BookmarkCheck className="h-5 w-5 text-amber-400 shrink-0" />
-              <span>1. 地點清單與分類 ({places.length})</span>
+              <BookmarkCheck className="h-4 w-4 text-amber-400 shrink-0" />
+              <span>1. 地點清單 ({places.length})</span>
             </button>
 
             <button
               id="nav-tab-planner"
               type="button"
               onClick={() => setActiveTab('planner')}
-              className={`flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-base sm:text-lg font-extrabold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 rounded-lg py-2 sm:py-2.5 px-2 text-sm sm:text-base font-black transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'planner'
-                  ? 'bg-amber-600 text-white shadow-sm'
+                  ? 'bg-amber-600 text-white shadow-xs'
                   : 'text-stone-600 hover:text-stone-900 hover:bg-white/60'
               }`}
             >
-              <Sparkles className="h-5 w-5 shrink-0" />
-              <span>2. 順路排程（對話＋地圖）</span>
+              <Sparkles className="h-4 w-4 shrink-0" />
+              <span>2. 順路排程</span>
             </button>
           </div>
         </div>

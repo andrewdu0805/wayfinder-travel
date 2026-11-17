@@ -224,42 +224,42 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
   return (
     <section
       id="smart-quick-add-section"
-      className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs space-y-4"
+      className="rounded-2xl border border-stone-200 bg-white p-3.5 sm:p-5 shadow-xs space-y-3"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-600/10 text-amber-700">
-            <Sparkles className="h-5 w-5" />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-amber-600/10 text-amber-700">
+            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5" />
           </span>
-          <h2 className="text-lg sm:text-xl font-extrabold text-stone-900">
-            ➕ 新增地點（貼上 Google Maps 連結、店名或推薦文字）
+          <h2 className="text-base sm:text-xl font-black text-stone-900">
+            ➕ 快速新增地點
           </h2>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <button
             id="btn-paste-clipboard"
             type="button"
             onClick={handlePasteClipboard}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-50 px-3.5 py-2 text-sm sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 rounded-xl border border-stone-300 bg-stone-50 px-2.5 sm:px-3.5 py-1.5 text-xs sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
           >
-            <ClipboardPaste className="h-4 w-4 text-amber-700" />
+            <ClipboardPaste className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-700" />
             貼上剪貼簿
           </button>
           <button
             id="btn-toggle-takeout-import"
             type="button"
             onClick={() => setShowFileImport((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-50 px-3.5 py-2 text-sm sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 rounded-xl border border-stone-300 bg-stone-50 px-2.5 sm:px-3.5 py-1.5 text-xs sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
           >
-            <FileUp className="h-4 w-4 text-teal-700" />
-            匯入檔案
+            <FileUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-teal-700" />
+            匯入
           </button>
         </div>
       </div>
 
       {/* Main Large Input Box */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
         <div className="relative flex-1">
           <textarea
             id="smart-parse-textarea"
@@ -272,8 +272,8 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
                 handleSmartSubmit();
               }
             }}
-            placeholder="例如：六千泓佐牛肉湯 台南中西區必吃早餐，或直接貼上 Google Maps 網址..."
-            className="w-full rounded-xl border-2 border-stone-300 bg-stone-50/70 px-4 py-3 text-base sm:text-lg font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:outline-none transition-colors resize-none"
+            placeholder="貼上 Google Maps 網址或輸入店名（例如：阿堂鹹粥 台南必吃）..."
+            className="w-full rounded-xl border-2 border-stone-300 bg-stone-50/70 px-3.5 py-2.5 text-base sm:text-lg font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:outline-none transition-colors resize-none"
           />
         </div>
         <button
@@ -281,7 +281,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
           type="button"
           disabled={isParsing || !inputText.trim()}
           onClick={() => handleSmartSubmit()}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-stone-900 px-6 py-3.5 text-base sm:text-lg font-extrabold text-white hover:bg-stone-800 disabled:opacity-45 transition-all cursor-pointer shrink-0"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-stone-900 px-5 sm:px-6 py-2.5 sm:py-3.5 text-base sm:text-lg font-black text-white hover:bg-stone-800 disabled:opacity-45 transition-all cursor-pointer shrink-0"
         >
           {isParsing ? (
             <>
