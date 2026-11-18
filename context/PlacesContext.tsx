@@ -19,6 +19,10 @@ import {
   DEFAULT_CATEGORY_CONFIGS,
   INITIAL_SAVED_PLACES,
 } from '@/lib/default-data';
+import {
+  extractRegionFromAddress,
+  separateNameAndAddress,
+} from '@/lib/geo-utils';
 
 const STORAGE_KEYS = {
   PLACES: 'antigravity_travel_places_v1',
@@ -67,6 +71,46 @@ function normalizePlaceName(name: string): string {
     .toLowerCase();
 }
 
+export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
+  const sep = separateNameAndAddress(p.name);
+  let nextName = p.name;
+  let nextAddr = p.formatted_address || '';
+  let nextCity = p.city;
+  let nextDist = p.district;
+
+  if (sep.foundAddress && sep.cleanName && sep.cleanName !== p.name) {
+    nextName = sep.cleanName;
+    if (
+      !nextAddr ||
+      nextAddr.includes('鹽埕區臺南市') ||
+      nextAddr.includes('鹽埕區台南市') ||
+      nextAddr.length < 5
+    ) {
+      nextAddr = sep.foundAddress;
+    }
+  }
+
+  // Detect true region from full text
+  const reg = extractRegionFromAddress(
+    `${nextAddr} ${p.formatted_address || ''} ${nextName} ${p.name}`,
+    { lat: p.latitude, lng: p.longitude },
+    nextCity
+  );
+
+  if (reg.city && reg.district) {
+    nextCity = reg.city;
+    nextDist = reg.district;
+  }
+
+  return {
+    ...p,
+    name: nextName,
+    formatted_address: nextAddr || p.formatted_address,
+    city: nextCity,
+    district: nextDist,
+  };
+}
+
 export function PlacesProvider({ children }: { children: React.ReactNode }) {
   const [places, setPlaces] = useState<SavedPlace[]>(INITIAL_SAVED_PLACES);
   const [categoryConfigs, setCategoryConfigs] = useState<CategoryConfig[]>(
@@ -85,7 +129,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       if (rawPlaces !== null) {
         const parsed = JSON.parse(rawPlaces);
         if (Array.isArray(parsed)) {
-          setPlaces(parsed);
+          setPlaces(parsed.map(sanitizePlaceRecord));
         }
       }
       const rawCats = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
@@ -220,14 +264,15 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       setPlaces((prevPlaces) => {
         const nextList = [...prevPlaces];
 
-        for (const item of incoming) {
+        for (const rawItem of incoming) {
+          const item = sanitizePlaceRecord(rawItem);
           const normIncoming = normalizePlaceName(item.name);
           const existingIdx = nextList.findIndex(
             (p) =>
               (item.google_place_id &&
                 p.google_place_id === item.google_place_id) ||
               (normalizePlaceName(p.name) === normIncoming &&
-                p.city === item.city)
+                (p.city === item.city || p.district === item.district))
           );
 
           if (existingIdx !== -1) {

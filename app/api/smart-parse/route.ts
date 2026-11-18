@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI, Type } from '@google/genai';
-import { extractRegionFromAddress } from '@/lib/geo-utils';
+import {
+  extractRegionFromAddress,
+  separateNameAndAddress,
+} from '@/lib/geo-utils';
 import { CategoryConfig, SavedPlace, VisitStatus } from '@/types/place';
 import { DEFAULT_CATEGORY_CONFIGS } from '@/lib/default-data';
 
@@ -285,12 +288,6 @@ export async function POST(req: NextRequest) {
         const decodedUrl = decodeURIComponent(finalUrl);
         resolvedInput = `${rawInput} [展開網址: ${decodedUrl}]`;
 
-        // Check /place/<PlaceName> in URL
-        const placeMatch = decodedUrl.match(/\/place\/([^/@?]+)/);
-        if (placeMatch) {
-          urlDetectedName = placeMatch[1].replace(/\+/g, ' ').trim();
-        }
-
         // Check coordinates @lat,lng
         const coordMatch = decodedUrl.match(/@([0-9.-]+),([0-9.-]+)/);
         if (coordMatch) {
@@ -301,11 +298,32 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Parse HTML OpenGraph / title metadata
+        // 1. Parse HTML title tag (e.g. <title>阿蓮牛肉湯 - Google 地圖</title>)
         const html = await res.text();
+        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+        if (titleMatch) {
+          const cleanTitle = titleMatch[1]
+            .replace(/\s*[-–—|·]\s*(Google\s*(Maps|地圖)|Google).*$/i, '')
+            .trim();
+          if (
+            cleanTitle &&
+            !cleanTitle.includes('Google 地圖') &&
+            !cleanTitle.includes('Google Maps')
+          ) {
+            const sepTitle = separateNameAndAddress(cleanTitle);
+            if (sepTitle.cleanName) urlDetectedName = sepTitle.cleanName;
+            if (sepTitle.foundAddress) urlDetectedAddress = sepTitle.foundAddress;
+          }
+        }
+
+        // 2. Parse HTML OpenGraph metadata
         const ogTitleMatch =
-          html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i) ||
-          html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
+          html.match(
+            /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i
+          ) ||
+          html.match(
+            /<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i
+          );
         if (
           ogTitleMatch &&
           ogTitleMatch[1] &&
@@ -313,8 +331,36 @@ export async function POST(req: NextRequest) {
           !ogTitleMatch[1].includes('Google 地圖')
         ) {
           const parts = ogTitleMatch[1].split(/·|-/).map((s) => s.trim());
-          if (parts[0] && !urlDetectedName) urlDetectedName = parts[0];
-          if (parts[1] && !urlDetectedAddress) urlDetectedAddress = parts[1];
+          if (parts[0]) {
+            const sep0 = separateNameAndAddress(parts[0]);
+            if (sep0.cleanName) urlDetectedName = sep0.cleanName;
+            if (sep0.foundAddress && !urlDetectedAddress) {
+              urlDetectedAddress = sep0.foundAddress;
+            }
+          }
+          if (parts[1]) {
+            const sep1 = separateNameAndAddress(parts[1]);
+            if (sep1.foundAddress) {
+              urlDetectedAddress = sep1.foundAddress;
+            } else if (!urlDetectedAddress) {
+              urlDetectedAddress = parts[1];
+            }
+          }
+        }
+
+        // 3. Check /place/<PlaceName> in URL
+        const placeMatch = decodedUrl.match(/\/place\/([^/@?]+)/);
+        if (placeMatch) {
+          const placeRaw = placeMatch[1].replace(/\+/g, ' ').trim();
+          const sepPlace = separateNameAndAddress(placeRaw);
+          if (sepPlace.foundAddress && !urlDetectedAddress) {
+            urlDetectedAddress = sepPlace.foundAddress;
+          }
+          if (sepPlace.cleanName && !urlDetectedName) {
+            urlDetectedName = sepPlace.cleanName;
+          } else if (!urlDetectedName && !sepPlace.foundAddress) {
+            urlDetectedName = placeRaw;
+          }
         }
       } catch {
         // Fall back to text parsing if network request is blocked or times out
@@ -481,18 +527,29 @@ ${resolvedInput}`,
       let foundStoreName = urlDetectedName || '';
       let foundAddress = urlDetectedAddress || '';
 
+      // Check rawInput with separateNameAndAddress
+      const rawSep = separateNameAndAddress(rawInput);
+      if (rawSep.foundAddress && !foundAddress) {
+        foundAddress = rawSep.foundAddress;
+      }
+      if (rawSep.cleanName && !foundStoreName && rawSep.cleanName !== rawInput) {
+        foundStoreName = rawSep.cleanName;
+      }
+
       for (const line of rawLines) {
         if (/https?:\/\//i.test(line)) continue;
-        if (
-          /(台灣|7\d\d|8\d\d|台北|臺北|新北|桃園|台中|臺中|台南|臺南|高雄|基隆|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖)/.test(
-            line
-          ) &&
-          /(市|區|鎮|鄉|路|街|號)/.test(line)
-        ) {
-          if (!foundAddress) foundAddress = line;
-          continue;
+        const lineSep = separateNameAndAddress(line);
+        if (lineSep.foundAddress && !foundAddress) {
+          foundAddress = lineSep.foundAddress;
         }
-        if (/^[0-9.]+\s*★|★+|已打烊|開始營業|營業中|查看附近的餐廳|儲存至/.test(line)) {
+        if (lineSep.cleanName && !foundStoreName && lineSep.cleanName !== line) {
+          foundStoreName = lineSep.cleanName;
+        }
+        if (
+          /^[0-9.]+\s*★|★+|已打烊|開始營業|營業中|查看附近的餐廳|儲存至/.test(
+            line
+          )
+        ) {
           continue;
         }
         const cleaned = line
@@ -516,9 +573,13 @@ ${resolvedInput}`,
 
       for (const rawItem of rawNames) {
         const withoutUrl = rawItem.replace(/https?:\/\/[^\s)]+/gi, '').trim();
-        const parts = withoutUrl.split(/\s+[—\-｜|]\s+|\s*\(([^)]+)\)\s*/);
+        const sepItem = separateNameAndAddress(withoutUrl);
+        const candidateName = sepItem.cleanName || withoutUrl;
+        const candidateAddress = sepItem.foundAddress || foundAddress;
+
+        const parts = candidateName.split(/\s+[—\-｜|]\s+|\s*\(([^)]+)\)\s*/);
         const cleanName =
-          (parts[0] || withoutUrl).replace(/^[0-9.、・\s]+/, '').trim() ||
+          (parts[0] || candidateName).replace(/^[0-9.、・\s]+/, '').trim() ||
           foundStoreName ||
           '新收藏景點';
         const notePart =
@@ -531,7 +592,7 @@ ${resolvedInput}`,
 
         extractedCandidates.push({
           name: cleanName,
-          addressHint: foundAddress || defaultCity,
+          addressHint: candidateAddress || '',
           primary_category: heuristic.primary_category,
           sub_category: heuristic.sub_category,
           visit_status: heuristic.visit_status,
@@ -566,25 +627,43 @@ ${resolvedInput}`,
     for (let i = 0; i < extractedCandidates.length; i++) {
       const cand = extractedCandidates[i];
 
-      // Detect city from candidate address or name
-      const textToSearchCity = `${cand.addressHint} ${cand.name} ${rawInput}`;
-      const cityMatch = textToSearchCity.match(
-        /(台北市|臺北市|新北市|桃園市|台中市|臺中市|台南市|臺南市|高雄市|基隆市|新竹市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義市|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|臺東縣|澎湖縣|金門縣|東京都|京都府|大阪府)/
-      );
-      const detectedCityKey = cityMatch
-        ? cityMatch[1].replace('臺', '台')
-        : (defaultCity in cityCenterMap ? defaultCity : '台南市');
+      // Ensure store name does NOT contain address
+      const sepCand = separateNameAndAddress(cand.name);
+      if (sepCand.foundAddress) {
+        cand.name = sepCand.cleanName;
+        if (!cand.addressHint) cand.addressHint = sepCand.foundAddress;
+      }
 
+      // Detect city and district strictly from address, candidate name, coordinates, and rawInput
+      const fullLocationString = [
+        urlDetectedAddress,
+        cand.addressHint,
+        cand.name,
+        rawInput,
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      const region = extractRegionFromAddress(
+        fullLocationString,
+        urlDetectedCoords,
+        defaultCity || '台南市'
+      );
+
+      const detectedCityKey = region.city;
       const baseCenter =
         cityCenterMap[detectedCityKey] ||
-        (defaultCity in cityCenterMap ? cityCenterMap[defaultCity] : cityCenterMap['台南市']);
+        (defaultCity in cityCenterMap
+          ? cityCenterMap[defaultCity]
+          : cityCenterMap['台南市']);
 
       let placeId = `custom_${cand.name.replace(/\s+/g, '_').toLowerCase()}`;
       let formattedAddress =
         urlDetectedAddress ||
-        (cand.addressHint && cand.addressHint !== defaultCity
+        (cand.addressHint
           ? cand.addressHint
-          : `${baseCenter.country}${detectedCityKey}${baseCenter.dist}${cand.name}`);
+          : `${region.country}${region.city}${region.district}${cand.name}`);
+
       let lat =
         urlDetectedCoords?.lat ??
         baseCenter.lat + Math.sin(i * 1.9 + cand.name.length) * 0.0045;
@@ -598,11 +677,9 @@ ${resolvedInput}`,
       if (googleMapsApiKey && googleMapsApiKey !== 'your-google-maps-api-key') {
         try {
           const searchQuery =
-            cand.addressHint &&
-            cand.addressHint !== defaultCity &&
-            !cand.name.includes(cand.addressHint)
+            cand.addressHint && !cand.name.includes(cand.addressHint)
               ? `${cand.name} ${cand.addressHint}`
-              : cand.name;
+              : `${cand.name} ${region.city}`;
 
           const placesRes = await fetch(
             'https://places.googleapis.com/v1/places:searchText',
@@ -629,7 +706,22 @@ ${resolvedInput}`,
               if (top.displayName?.text) {
                 cand.name = top.displayName.text;
               }
-              formattedAddress = top.formattedAddress || formattedAddress;
+              if (top.formattedAddress) {
+                formattedAddress = top.formattedAddress;
+                const officialRegion = extractRegionFromAddress(
+                  top.formattedAddress,
+                  top.location
+                    ? {
+                        lat: top.location.latitude,
+                        lng: top.location.longitude,
+                      }
+                    : null,
+                  region.city
+                );
+                region.city = officialRegion.city;
+                region.district = officialRegion.district;
+                region.country = officialRegion.country;
+              }
               lat = top.location?.latitude ?? lat;
               lng = top.location?.longitude ?? lng;
               rating = top.rating ?? rating;
@@ -643,8 +735,6 @@ ${resolvedInput}`,
           console.warn('Google Places API lookup fallback:', err);
         }
       }
-
-      const region = extractRegionFromAddress(formattedAddress);
 
       parsedPlaces.push({
         id: `place-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
