@@ -173,16 +173,128 @@ export const DISTRICT_TO_CITY_MAP: Record<string, string> = {
   清水寺: '京都府', 中京區: '京都府',
 };
 
+const TW_SUB_TOKEN_PATTERN =
+  '(?:' +
+  '(?:(?<!夜|超|門|菜|魚|花|古|早|牛|果)[^\\d\\s,，。、]{1,3}[區鎮鄉市](?![場集民街路]))|' +
+  '(?:[^\\d\\s,，。、]{1,6}?(?:[一二三四五六七八九十\\d]+段)?(?:\\d+巷)?(?:\\d+弄)?\\d+(?:[之\\-]\\d+)?號(?:之\\d+)?(?:\\d+[樓Ff])?)|' +
+  '(?:[^\\d\\s,，。、]{1,3}[里村](?:\\d+鄰)?(?:[^\\d\\s,，。、]{2,4}(?:大道|路|街)(?:[一二三四五六七八九十\\d]+段)?(?!\\d|[一二三四五六七八九十]+段))?)|' +
+  '(?:\\d+鄰)|' +
+  '(?:[^\\d\\s,，。、]{2,4}大道(?:[一二三四五六七八九十\\d]+段)?(?!\\d))|' +
+  '(?:\\d+巷)|' +
+  '(?:\\d+弄)|' +
+  '(?:\\d+[樓Ff])' +
+  ')';
+
 const TAIWAN_ADDR_REGEX = new RegExp(
   '(?:(?:台灣|臺灣)\\s*)?' +
   '(?:\\d{3,5}\\s*)?' +
-  '(?:' + TAIWAN_CITIES.join('|') + ')' +
-  '(?:[^\\d\\s]{1,4}[區市鎮鄉])' +
-  '[^\\s+]+?(?:[0-9]+(?:[之\\-]\\d+)?號(?:之\\d+)?(?:[0-9]+[樓Ff])?|[0-9]+號|[0-9]+番地)'
+  '(?:' +
+  TAIWAN_CITIES.join('|') +
+  ')' +
+  TW_SUB_TOKEN_PATTERN +
+  '+'
 );
 
 const JAPAN_ADDR_REGEX =
   /(?:日本)?(?:東京都|大阪府|京都府|北海道|[^\s,]+?[都道府県])(?:[^\s,都道府県]+?[区區市町村])(?:[^\s,]+?[0-9\-丁目番地号號]+)/;
+
+// Known road/village/landmark to District hints when Google Maps omits District
+const LANDMARK_OR_ROAD_TO_DISTRICT: Array<{
+  keywords: string[];
+  city: string;
+  district: string;
+}> = [
+  {
+    keywords: [
+      '永華里',
+      '湯德章大道',
+      '臺灣文學館',
+      '台灣文學館',
+      '林百貨',
+      '赤崁樓',
+      '神農街',
+      '國華街',
+      '保安路',
+      '海安路',
+      '友愛街',
+      '正興街',
+      '民族路二段',
+      '民生路一段',
+      '民生路二段',
+      '府前路',
+      '西門路二段',
+      '忠義路',
+      '永福路',
+      '中正路1號',
+    ],
+    city: '台南市',
+    district: '中西區',
+  },
+  {
+    keywords: ['安平古堡', '安平老街', '安平樹屋', '億載金城', '安平路', '古堡街', '漁光島'],
+    city: '台南市',
+    district: '安平區',
+  },
+  {
+    keywords: ['奇美博物館', '十鼓文創', '虎山里', '文華路二段'],
+    city: '台南市',
+    district: '仁德區',
+  },
+  {
+    keywords: ['駁二', '大義街', '大勇路', '新樂街', '五福四路', '大成街', '七賢三路'],
+    city: '高雄市',
+    district: '鹽埕區',
+  },
+  {
+    keywords: ['西子灣', '哈瑪星', '馬卡道路', '內惟藝術中心', '美術館路', '哨船頭'],
+    city: '高雄市',
+    district: '鼓山區',
+  },
+];
+
+// District centroids for coordinate-based district fallback
+const DISTRICT_CENTROIDS: Array<{
+  city: string;
+  district: string;
+  lat: number;
+  lng: number;
+}> = [
+  { city: '台南市', district: '中西區', lat: 22.992, lng: 120.198 },
+  { city: '台南市', district: '安平區', lat: 22.998, lng: 120.161 },
+  { city: '台南市', district: '東區', lat: 22.981, lng: 120.224 },
+  { city: '台南市', district: '北區', lat: 23.011, lng: 120.205 },
+  { city: '台南市', district: '南區', lat: 22.961, lng: 120.188 },
+  { city: '台南市', district: '永康區', lat: 23.026, lng: 120.256 },
+  { city: '台南市', district: '安南區', lat: 23.047, lng: 120.185 },
+  { city: '台南市', district: '新化區', lat: 23.038, lng: 120.311 },
+  { city: '台南市', district: '仁德區', lat: 22.942, lng: 120.242 },
+  { city: '台南市', district: '歸仁區', lat: 22.925, lng: 120.286 },
+  { city: '台南市', district: '龍崎區', lat: 22.952, lng: 120.385 },
+  { city: '台南市', district: '善化區', lat: 23.132, lng: 120.296 },
+  { city: '台南市', district: '玉井區', lat: 23.124, lng: 120.461 },
+  { city: '高雄市', district: '鹽埕區', lat: 22.624, lng: 120.284 },
+  { city: '高雄市', district: '鼓山區', lat: 22.648, lng: 120.276 },
+  { city: '高雄市', district: '前金區', lat: 22.627, lng: 120.295 },
+  { city: '高雄市', district: '新興區', lat: 22.631, lng: 120.305 },
+  { city: '高雄市', district: '苓雅區', lat: 22.621, lng: 120.318 },
+  { city: '高雄市', district: '前鎮區', lat: 22.594, lng: 120.316 },
+  { city: '高雄市', district: '左營區', lat: 22.685, lng: 120.298 },
+  { city: '高雄市', district: '三民區', lat: 22.648, lng: 120.322 },
+  { city: '高雄市', district: '鳳山區', lat: 22.627, lng: 120.357 },
+  { city: '台北市', district: '大同區', lat: 25.063, lng: 121.513 },
+  { city: '台北市', district: '中正區', lat: 25.032, lng: 121.518 },
+  { city: '台北市', district: '萬華區', lat: 25.035, lng: 121.499 },
+  { city: '台北市', district: '中山區', lat: 25.064, lng: 121.533 },
+  { city: '台北市', district: '大安區', lat: 25.026, lng: 121.543 },
+  { city: '台北市', district: '信義區', lat: 25.033, lng: 121.568 },
+  { city: '台北市', district: '士林區', lat: 25.092, lng: 121.525 },
+  { city: '台北市', district: '北投區', lat: 25.132, lng: 121.501 },
+  { city: '台中市', district: '中區', lat: 24.142, lng: 120.681 },
+  { city: '台中市', district: '西區', lat: 24.145, lng: 120.663 },
+  { city: '台中市', district: '西屯區', lat: 24.179, lng: 120.641 },
+  { city: '台中市', district: '北區', lat: 24.157, lng: 120.682 },
+  { city: '台中市', district: '南屯區', lat: 24.139, lng: 120.635 },
+];
 
 /**
  * Separate full string (e.g. from Google Maps share text or URL) into clean store name and address
@@ -200,7 +312,7 @@ export function separateNameAndAddress(input: string): {
   let detectedDistrict = '';
   let country = '台灣';
 
-  // 1. Taiwan Address Match
+  // 1. Taiwan Address Match (supports addresses with or without District, and with trailing Village/Boulevard)
   const twMatch = str.match(TAIWAN_ADDR_REGEX);
   if (twMatch) {
     foundAddress = twMatch[0].trim();
@@ -211,7 +323,7 @@ export function separateNameAndAddress(input: string): {
     if (cMatch) {
       detectedCity = cMatch[1].replace('臺', '台');
       const afterCity = foundAddress.slice(cMatch.index! + cMatch[1].length);
-      const dMatch = afterCity.match(/^([^\\d\\s,]{1,4}?[區市鎮鄉])/);
+      const dMatch = afterCity.match(/^([^\d\s,]{1,3}?[區市鎮鄉])/);
       if (dMatch) {
         detectedDistrict = dMatch[1];
       }
@@ -228,7 +340,7 @@ export function separateNameAndAddress(input: string): {
         /(東京都|大阪府|京都府|北海道|[^\s,]+?[都道府県])/
       );
       if (cMatch) detectedCity = cMatch[1];
-      const dMatch = foundAddress.match(/([^\\s,都道府県]+?[区區市町村])/);
+      const dMatch = foundAddress.match(/([^\s,都道府県]+?[区區市町村])/);
       if (dMatch) detectedDistrict = dMatch[1];
     }
   }
@@ -254,6 +366,19 @@ export function separateNameAndAddress(input: string): {
   // If cleanName is empty (e.g. input was only an address), fallback to something readable
   if (!cleanName && foundAddress) {
     cleanName = foundAddress;
+  }
+
+  // Resolve district from landmark/road hint if missing
+  if (!detectedDistrict) {
+    for (const rule of LANDMARK_OR_ROAD_TO_DISTRICT) {
+      if (rule.keywords.some((kw) => str.includes(kw))) {
+        if (!detectedCity) detectedCity = rule.city;
+        if (detectedCity === rule.city) {
+          detectedDistrict = rule.district;
+          break;
+        }
+      }
+    }
   }
 
   return {
@@ -291,7 +416,7 @@ export function extractRegionFromAddress(
     const cityMatch = clean.match(
       /(東京都|大阪府|京都府|北海道|[^\s,]+?[都道府県])/
     );
-    const distMatch = clean.match(/([^\\s,都道府県]+?[区區市町村])/);
+    const distMatch = clean.match(/([^\s,都道府県]+?[区區市町村])/);
     return {
       country: '日本',
       city: cityMatch ? cityMatch[1] : '東京都',
@@ -311,48 +436,100 @@ export function extractRegionFromAddress(
     const afterCity = clean.slice(
       clean.indexOf(twCityMatch[1]) + twCityMatch[1].length
     );
-    const distMatch = afterCity.match(/^([^\\d\\s,]{1,4}?[區市鎮鄉])/);
+    const distMatch = afterCity.match(/^([^\d\s,]{1,3}?[區市鎮鄉])/);
     if (distMatch) {
       district = distMatch[1];
     }
   }
 
-  // 3. If city not found explicitly, match from known districts (e.g. 新化區 -> 台南市)
-  if (!cityRaw) {
+  // 3. Match from known districts (e.g. 新化區 -> 台南市)
+  if (!cityRaw || !district) {
     for (const [distKey, mappedCity] of Object.entries(DISTRICT_TO_CITY_MAP)) {
       if (clean.includes(distKey)) {
-        cityRaw = mappedCity;
-        district = distKey.endsWith('區') || distKey.endsWith('鎮') || distKey.endsWith('鄉')
-          ? distKey
-          : `${distKey}區`;
-        break;
+        if (!cityRaw) cityRaw = mappedCity;
+        if (cityRaw === mappedCity && !district) {
+          district =
+            distKey.endsWith('區') ||
+            distKey.endsWith('鎮') ||
+            distKey.endsWith('鄉')
+              ? distKey
+              : `${distKey}區`;
+          break;
+        }
       }
     }
   }
 
-  // 4. If still no city, verify coordinates if available
-  if (!cityRaw && coords) {
-    const { lat, lng } = coords;
-    if (lat >= 22.88 && lat <= 23.42 && lng >= 120.0 && lng <= 120.65) {
-      cityRaw = '台南市';
-    } else if (lat >= 22.45 && lat <= 22.88 && lng >= 120.15 && lng <= 120.8) {
-      cityRaw = '高雄市';
-    } else if (lat >= 24.95 && lat <= 25.3 && lng >= 121.4 && lng <= 121.7) {
-      cityRaw = '台北市';
-    } else if (lat >= 24.05 && lat <= 24.45 && lng >= 120.45 && lng <= 120.9) {
-      cityRaw = '台中市';
-    } else if (lat >= 35.5 && lat <= 35.85 && lng >= 139.5 && lng <= 140.0) {
-      return { country: '日本', city: '東京都', district: district || '台東區' };
+  // 4. Match from known landmark/village/road hints (e.g. 永華里 / 湯德章大道 -> 台南市・中西區)
+  if (!district) {
+    for (const rule of LANDMARK_OR_ROAD_TO_DISTRICT) {
+      if (rule.keywords.some((kw) => clean.includes(kw))) {
+        if (!cityRaw) cityRaw = rule.city;
+        if (cityRaw === rule.city) {
+          district = rule.district;
+          break;
+        }
+      }
     }
   }
 
-  // 5. Final fallback
+  // 5. Verify coordinates if available (resolves both city and nearest district!)
+  if (coords && !isNaN(coords.lat) && !isNaN(coords.lng)) {
+    const { lat, lng } = coords;
+    if (!cityRaw) {
+      if (lat >= 22.88 && lat <= 23.42 && lng >= 120.0 && lng <= 120.65) {
+        cityRaw = '台南市';
+      } else if (
+        lat >= 22.45 &&
+        lat <= 22.88 &&
+        lng >= 120.15 &&
+        lng <= 120.8
+      ) {
+        cityRaw = '高雄市';
+      } else if (lat >= 24.95 && lat <= 25.3 && lng >= 121.4 && lng <= 121.7) {
+        cityRaw = '台北市';
+      } else if (
+        lat >= 24.05 &&
+        lat <= 24.45 &&
+        lng >= 120.45 &&
+        lng <= 120.9
+      ) {
+        cityRaw = '台中市';
+      } else if (lat >= 35.5 && lat <= 35.85 && lng >= 139.5 && lng <= 140.0) {
+        return {
+          country: '日本',
+          city: '東京都',
+          district: district || '台東區',
+        };
+      }
+    }
+
+    if (!district) {
+      let bestDist = '';
+      let minMeters = Infinity;
+      for (const c of DISTRICT_CENTROIDS) {
+        if (cityRaw && c.city !== cityRaw) continue;
+        const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
+        if (d < minMeters && d <= 8000) {
+          minMeters = d;
+          bestDist = c.district;
+        }
+      }
+      if (bestDist) {
+        district = bestDist;
+      }
+    }
+  }
+
+  // 6. Final fallback
   if (!cityRaw) {
     cityRaw = fallbackCity || '台南市';
   }
 
   if (!district) {
-    const genericDist = clean.match(/([^\\d\\s,]{2,3}[區鎮鄉])/);
+    const genericDist = clean.match(
+      /(?<!夜|超|門|菜|魚|花|古|早|牛|果)([^\d\s,]{1,3}[區鎮鄉])/
+    );
     district = genericDist ? genericDist[1] : '市中心';
   }
 

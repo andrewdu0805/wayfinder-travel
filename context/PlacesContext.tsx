@@ -84,15 +84,17 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
       !nextAddr ||
       nextAddr.includes('鹽埕區臺南市') ||
       nextAddr.includes('鹽埕區台南市') ||
+      nextAddr.includes('市中心') ||
+      nextAddr.includes(p.name) ||
       nextAddr.length < 5
     ) {
       nextAddr = sep.foundAddress;
     }
   }
 
-  // Detect true region from full text
+  // Detect true region from full text + coordinates
   const reg = extractRegionFromAddress(
-    `${nextAddr} ${p.formatted_address || ''} ${nextName} ${p.name}`,
+    `${sep.foundAddress || ''} ${nextAddr} ${p.formatted_address || ''} ${nextName} ${p.name}`,
     { lat: p.latitude, lng: p.longitude },
     nextCity
   );
@@ -100,6 +102,11 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   if (reg.city && reg.district) {
     nextCity = reg.city;
     nextDist = reg.district;
+  }
+
+  // Also clean up formatted_address if it still has old placeholder "市中心"
+  if (nextAddr.includes('市中心') && nextDist !== '市中心') {
+    nextAddr = nextAddr.replace('市中心', nextDist);
   }
 
   return {

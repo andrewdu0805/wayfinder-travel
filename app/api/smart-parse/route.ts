@@ -348,8 +348,10 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // 3. Check /place/<PlaceName> in URL
-        const placeMatch = decodedUrl.match(/\/place\/([^/@?]+)/);
+        // 3. Check /place/<PlaceName>, /search/<Query>, or ?q=<Query> in URL
+        const placeMatch =
+          decodedUrl.match(/\/(?:place|search)\/([^/@?]+)/) ||
+          decodedUrl.match(/[?&]q=([^&]+)/);
         if (placeMatch) {
           const placeRaw = placeMatch[1].replace(/\+/g, ' ').trim();
           const sepPlace = separateNameAndAddress(placeRaw);
@@ -361,6 +363,12 @@ export async function POST(req: NextRequest) {
           } else if (!urlDetectedName && !sepPlace.foundAddress) {
             urlDetectedName = placeRaw;
           }
+        }
+
+        if (urlDetectedName || urlDetectedAddress) {
+          resolvedInput = `${rawInput}\n[展開網址: ${decodedUrl}]\n[系統預先分離純店名: ${
+            urlDetectedName || ''
+          }]\n[系統預先分離地址: ${urlDetectedAddress || ''}]`;
         }
       } catch {
         // Fall back to text parsing if network request is blocked or times out
@@ -458,6 +466,7 @@ export async function POST(req: NextRequest) {
 2. 若為博物館、美術館、文化園區或古蹟，primary_category 為 "museum_culture"，sub_category 為 "museum" 或 "landmark"。
 3. 若為主題樂園，primary_category 為 "theme_park_leisure"，sub_category 為 "amusement_park"。
 4. 若備註有明確提到「去過」，則 visit_status 為 "visited_revisit"，否則預設為 "unvisited"。
+5. 【極重要】name 欄位「絕對不可」包含任何縣市、鄉鎮市區、村里鄰、路街段巷弄號、大道或郵遞區號等地址字串（例如若輸入為「臺南市中正路1號永華里湯德章大道國立臺灣文學館」，name 必須僅為「國立臺灣文學館 National Museum of Taiwan Literature」，地址請放入 addressHint）。若系統已提供「[系統預先分離純店名]」，請優先採用該純店名。
 預設所在城市提示：${defaultCity}
 
 使用者輸入內容：
@@ -735,6 +744,27 @@ ${resolvedInput}`,
           console.warn('Google Places API lookup fallback:', err);
         }
       }
+
+      // Final guard: guarantee cand.name never contains any street/village/city address prefix
+      const finalSep = separateNameAndAddress(cand.name);
+      if (finalSep.foundAddress && finalSep.cleanName) {
+        cand.name = finalSep.cleanName;
+        if (
+          !formattedAddress ||
+          formattedAddress.includes('市中心') ||
+          formattedAddress.length < finalSep.foundAddress.length
+        ) {
+          formattedAddress = finalSep.foundAddress;
+        }
+      }
+      const finalRegion = extractRegionFromAddress(
+        `${formattedAddress} ${cand.addressHint || ''} ${rawInput}`,
+        { lat, lng },
+        region.city
+      );
+      region.city = finalRegion.city;
+      region.district = finalRegion.district;
+      region.country = finalRegion.country;
 
       parsedPlaces.push({
         id: `place-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
