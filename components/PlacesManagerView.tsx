@@ -2,15 +2,12 @@
 
 import React, { useMemo, useState } from 'react';
 import {
-  Filter,
   FolderCog,
-  Globe2,
-  RefreshCw,
   RotateCcw,
   Search,
+  X,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
-import { ALL_AVAILABLE_CITIES } from '@/lib/default-data';
 import { VisitStatus } from '@/types/place';
 import { SmartQuickAddBar } from './SmartQuickAddBar';
 import { PlaceCard } from './PlaceCard';
@@ -25,9 +22,6 @@ export function PlacesManagerView({
   const {
     places,
     categoryConfigs,
-    isSyncing,
-    lastSyncMessage,
-    refreshPlacesHours,
   } = usePlaces();
 
   const [selectedCity, setSelectedCity] = useState<string>('ALL');
@@ -53,7 +47,7 @@ export function PlacesManagerView({
     setSearchQuery('');
   };
 
-  // Automatically aggregate cities & counts from saved places
+  // Automatically aggregate cities & counts from saved places (sorted by count desc)
   const cityGroups = useMemo(() => {
     const map = new Map<
       string,
@@ -72,7 +66,7 @@ export function PlacesManagerView({
         });
       }
     }
-    return Array.from(map.values());
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
   }, [places]);
 
   // Filter places by region, category, visit_status, and search keyword
@@ -108,75 +102,69 @@ export function PlacesManagerView({
     searchQuery,
   ]);
 
-  const handleBatchRefreshRegionHours = async () => {
-    await refreshPlacesHours(filteredPlaces);
-  };
+  const hasActiveFilter =
+    selectedCity !== 'ALL' ||
+    selectedSubCategory !== 'ALL' ||
+    selectedVisitStatus !== 'ALL' ||
+    Boolean(searchQuery.trim());
 
   return (
-    <div className="space-y-5">
-      {/* 頂部：新增地點大輸入框 */}
+    <div className="space-y-3.5">
+      {/* 頂部：極簡快速新增列 */}
       <SmartQuickAddBar activeCity={selectedCity} />
 
-      {/* 獨立分類篩選面板（大字體、一目了然） */}
-      <section className="rounded-2xl border border-stone-200 bg-white p-3.5 sm:p-5 shadow-xs space-y-3.5 sm:space-y-4">
-        {/* 第一排：城市／地區選擇 */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-stone-100">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-sm sm:text-base font-extrabold text-stone-700 mr-1">
-              <Globe2 className="h-4 w-4 sm:h-5 sm:w-5 text-teal-700" />
-              📍 地區：
-            </span>
-            <button
-              type="button"
-              onClick={() => handleSelectCity('ALL')}
-              className={`rounded-xl px-3 sm:px-4 py-1.5 sm:py-2 text-sm sm:text-base font-extrabold transition-all cursor-pointer ${
-                selectedCity === 'ALL'
-                  ? 'bg-stone-900 text-white shadow-xs'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+      {/* 極簡緊湊篩選面板（不隨城市與分類增加而變長，永遠維持固定高度） */}
+      <section className="rounded-2xl border border-stone-200 bg-white p-3 sm:p-4 shadow-xs space-y-2.5">
+        {/* 第一排：📍 地區下拉選單 ＋ 🏷️ 分類下拉選單 ＋ ⚙️ 自訂分類 */}
+        <div className="grid grid-cols-12 gap-2 items-center">
+          {/* 📍 地區下拉選單（整合已收藏城市與全台/海外切換） */}
+          <div className="col-span-5 sm:col-span-5">
+            <select
+              aria-label="選擇地區"
+              value={selectedCity}
+              onChange={(e) => handleSelectCity(e.target.value)}
+              className={`w-full rounded-xl border-2 px-2.5 sm:px-3.5 py-2 text-sm sm:text-base font-extrabold focus:outline-none cursor-pointer transition-colors truncate ${
+                selectedCity !== 'ALL'
+                  ? 'border-stone-900 bg-stone-900 text-white'
+                  : 'border-stone-300 bg-stone-50 text-stone-800 hover:bg-stone-100'
               }`}
             >
-              全部 ({places.length})
-            </button>
-            {cityGroups.map((grp) => (
-              <button
-                key={grp.city}
-                type="button"
-                onClick={() => handleSelectCity(grp.city)}
-                className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
-                  selectedCity === grp.city
-                    ? 'bg-stone-900 text-white shadow-xs'
-                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-                }`}
-              >
-                {grp.city} ({grp.count})
-              </button>
-            ))}
+              <option value="ALL" className="bg-white text-stone-900 font-bold">
+                📍 全部地區 ({places.length})
+              </option>
 
-            {/* 若當前選擇的城市不在現有卡片群中（新切換的城市），顯示該城市的專屬標籤 */}
-            {selectedCity !== 'ALL' &&
-              !cityGroups.some((g) => g.city === selectedCity) && (
-                <button
-                  type="button"
-                  onClick={() => handleSelectCity(selectedCity)}
-                  className="rounded-xl px-4 py-2 text-base font-extrabold bg-stone-900 text-white shadow-xs cursor-pointer"
+              {cityGroups.length > 0 && (
+                <optgroup
+                  label="⭐ 已收藏地區"
+                  className="bg-white text-stone-900 font-bold"
                 >
-                  📍 {selectedCity} (0)
-                </button>
+                  {cityGroups.map((grp) => (
+                    <option
+                      key={grp.city}
+                      value={grp.city}
+                      className="bg-white text-stone-900 font-bold"
+                    >
+                      📍 {grp.city} ({grp.count})
+                    </option>
+                  ))}
+                </optgroup>
               )}
 
-            {/* 一鍵切換全台其他縣市與海外旅遊城市 */}
-            <select
-              aria-label="選擇其他縣市或地區"
-              value={selectedCity !== 'ALL' ? selectedCity : ''}
-              onChange={(e) => {
-                if (e.target.value) {
-                  handleSelectCity(e.target.value);
-                }
-              }}
-              className="rounded-xl border-2 border-dashed border-teal-300 bg-teal-50/70 px-3 py-2 text-sm sm:text-base font-extrabold text-teal-900 hover:bg-teal-100/70 focus:outline-none cursor-pointer"
-            >
-              <option value="">＋ 切換／加入其他縣市...</option>
-              <optgroup label="台灣北部">
+              {/* 若目前選中的新城市為 0 筆，確保顯示於選單中 */}
+              {selectedCity !== 'ALL' &&
+                !cityGroups.some((g) => g.city === selectedCity) && (
+                  <option
+                    value={selectedCity}
+                    className="bg-white text-stone-900 font-bold"
+                  >
+                    📍 {selectedCity} (0)
+                  </option>
+                )}
+
+              <optgroup
+                label="➕ 切換其他台灣北部縣市"
+                className="bg-white text-stone-900"
+              >
                 <option value="台北市">台北市</option>
                 <option value="新北市">新北市</option>
                 <option value="基隆市">基隆市</option>
@@ -185,27 +173,39 @@ export function PlacesManagerView({
                 <option value="新竹縣">新竹縣</option>
                 <option value="宜蘭縣">宜蘭縣</option>
               </optgroup>
-              <optgroup label="台灣中部">
+              <optgroup
+                label="➕ 切換其他台灣中部縣市"
+                className="bg-white text-stone-900"
+              >
                 <option value="台中市">台中市</option>
                 <option value="苗栗縣">苗栗縣</option>
                 <option value="彰化縣">彰化縣</option>
                 <option value="南投縣">南投縣</option>
                 <option value="雲林縣">雲林縣</option>
               </optgroup>
-              <optgroup label="台灣南部">
+              <optgroup
+                label="➕ 切換其他台灣南部縣市"
+                className="bg-white text-stone-900"
+              >
                 <option value="台南市">台南市</option>
                 <option value="高雄市">高雄市</option>
                 <option value="嘉義市">嘉義市</option>
                 <option value="嘉義縣">嘉義縣</option>
                 <option value="屏東縣">屏東縣</option>
               </optgroup>
-              <optgroup label="台灣東部與離島">
+              <optgroup
+                label="➕ 切換東部與離島"
+                className="bg-white text-stone-900"
+              >
                 <option value="花蓮縣">花蓮縣</option>
                 <option value="台東縣">台東縣</option>
                 <option value="澎湖縣">澎湖縣</option>
                 <option value="金門縣">金門縣</option>
               </optgroup>
-              <optgroup label="日本與海外">
+              <optgroup
+                label="➕ 切換日本與海外"
+                className="bg-white text-stone-900"
+              >
                 <option value="東京都">東京都</option>
                 <option value="京都府">京都府</option>
                 <option value="大阪府">大阪府</option>
@@ -216,65 +216,74 @@ export function PlacesManagerView({
             </select>
           </div>
 
-          <button
-            id="btn-open-category-settings"
-            type="button"
-            onClick={onOpenSettingsModal}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-50 px-4 py-2 text-sm sm:text-base font-bold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
-          >
-            <FolderCog className="h-4 w-4 text-amber-700" />
-            ＋ 自訂分類
-          </button>
-        </div>
-
-        {/* 第二排：地點類型分類（正餐、點心、伴手禮、展館...） */}
-        <div className="flex flex-wrap items-center gap-2 pb-4 border-b border-stone-100">
-          <span className="inline-flex items-center gap-1.5 text-base font-extrabold text-stone-700 mr-1">
-            <Filter className="h-5 w-5 text-amber-700" />
-            🏷️ 分類：
-          </span>
-          <button
-            type="button"
-            onClick={() => setSelectedSubCategory('ALL')}
-            className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
-              selectedSubCategory === 'ALL'
-                ? 'bg-amber-600 text-white shadow-xs'
-                : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-            }`}
-          >
-            全部分類 ({placesInSelectedCity.length})
-          </button>
-          {categoryConfigs.map((cfg) => {
-            const count = placesInSelectedCity.filter(
-              (p) => p.sub_category === cfg.sub_category
-            ).length;
-            if (count === 0 && selectedSubCategory !== cfg.sub_category) return null;
-            return (
-              <button
-                key={cfg.id}
-                type="button"
-                onClick={() => setSelectedSubCategory(cfg.sub_category)}
-                className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
-                  selectedSubCategory === cfg.sub_category
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-                }`}
+          {/* 🏷️ 分類下拉選單（正餐、點心、伴手禮、博物館... 不佔多行） */}
+          <div className="col-span-5 sm:col-span-5">
+            <select
+              aria-label="選擇地點分類"
+              value={selectedSubCategory}
+              onChange={(e) => {
+                if (e.target.value === '__OPEN_SETTINGS__') {
+                  onOpenSettingsModal();
+                  return;
+                }
+                setSelectedSubCategory(e.target.value);
+              }}
+              className={`w-full rounded-xl border-2 px-2.5 sm:px-3.5 py-2 text-sm sm:text-base font-extrabold focus:outline-none cursor-pointer transition-colors truncate ${
+                selectedSubCategory !== 'ALL'
+                  ? 'border-amber-600 bg-amber-600 text-white'
+                  : 'border-stone-300 bg-stone-50 text-stone-800 hover:bg-stone-100'
+              }`}
+            >
+              <option value="ALL" className="bg-white text-stone-900 font-bold">
+                🏷️ 全部分類 ({placesInSelectedCity.length})
+              </option>
+              {categoryConfigs.map((cfg) => {
+                const count = placesInSelectedCity.filter(
+                  (p) => p.sub_category === cfg.sub_category
+                ).length;
+                return (
+                  <option
+                    key={cfg.id}
+                    value={cfg.sub_category}
+                    className="bg-white text-stone-900 font-bold"
+                  >
+                    🏷️ {cfg.sub_label} ({count})
+                  </option>
+                );
+              })}
+              <option
+                value="__OPEN_SETTINGS__"
+                className="bg-amber-50 text-amber-900 font-bold"
               >
-                {cfg.sub_label} ({count})
-              </button>
-            );
-          })}
+                ➕ 新增／管理自訂分類...
+              </option>
+            </select>
+          </div>
+
+          {/* ⚙️ 自訂分類快捷鈕 */}
+          <div className="col-span-2 sm:col-span-2 flex justify-end">
+            <button
+              id="btn-open-category-settings"
+              type="button"
+              onClick={onOpenSettingsModal}
+              title="新增或管理自訂分類"
+              className="w-full inline-flex items-center justify-center gap-1 rounded-xl border-2 border-stone-300 bg-stone-50 px-2 py-2 text-xs sm:text-sm font-extrabold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <FolderCog className="h-4 w-4 text-amber-700 shrink-0" />
+              <span className="hidden sm:inline">自訂</span>
+            </button>
+          </div>
         </div>
 
-        {/* 第三排：造訪狀態 ＋ 關鍵字搜尋 */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+        {/* 第二排：4 格緊湊狀態切換 ＋ 關鍵字即時搜尋 */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="grid grid-cols-4 gap-1.5">
             {(
               [
-                { key: 'ALL', label: '全部狀態' },
-                { key: 'unvisited', label: '🌟 想去（沒去過）' },
-                { key: 'visited_revisit', label: '❤️ 想再去' },
-                { key: 'visited_skip', label: '🚫 不推薦' },
+                { key: 'ALL', label: '全部' },
+                { key: 'unvisited', label: '🌟想去' },
+                { key: 'visited_revisit', label: '❤️再訪' },
+                { key: 'visited_skip', label: '🚫不推' },
               ] as Array<{ key: 'ALL' | VisitStatus; label: string }>
             ).map((st) => {
               const count =
@@ -288,10 +297,10 @@ export function PlacesManagerView({
                   key={st.key}
                   type="button"
                   onClick={() => setSelectedVisitStatus(st.key)}
-                  className={`rounded-xl px-4 py-2 text-base font-extrabold transition-all cursor-pointer ${
+                  className={`rounded-xl px-1.5 sm:px-3 py-1.5 text-xs sm:text-sm font-extrabold transition-all cursor-pointer text-center whitespace-nowrap ${
                     selectedVisitStatus === st.key
                       ? 'bg-teal-700 text-white shadow-xs'
-                      : 'border border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100'
+                      : 'border border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100'
                   }`}
                 >
                   {st.label} ({count})
@@ -300,15 +309,42 @@ export function PlacesManagerView({
             })}
           </div>
 
-          <div className="relative w-full sm:w-80">
-            <Search className="h-5 w-5 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜尋店名、區域或備註..."
-              className="w-full rounded-xl border-2 border-stone-300 bg-stone-50 pl-10 pr-4 py-2 text-base font-medium text-stone-900 focus:border-amber-600 focus:bg-white focus:outline-none"
-            />
+          <div className="flex items-center gap-1.5 flex-1 sm:max-w-xs">
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜尋店名、區域或備註..."
+                className="w-full rounded-xl border border-stone-300 bg-stone-50 pl-9 pr-8 py-1.5 text-sm font-medium text-stone-900 focus:border-amber-600 focus:bg-white focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {hasActiveFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCity('ALL');
+                  setSelectedSubCategory('ALL');
+                  setSelectedVisitStatus('ALL');
+                  setSearchQuery('');
+                }}
+                title="重設所有篩選"
+                className="rounded-xl border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-extrabold text-amber-900 hover:bg-amber-100 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                重設
+              </button>
+            )}
           </div>
         </div>
       </section>
@@ -360,7 +396,7 @@ export function PlacesManagerView({
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
           {filteredPlaces.map((place) => (
             <PlaceCard key={place.id} place={place} />
           ))}
