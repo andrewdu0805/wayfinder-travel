@@ -1,15 +1,18 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Clock,
   ExternalLink,
   Loader2,
+  Mic,
+  MicOff,
   Navigation,
   Repeat,
   RotateCcw,
   Sparkles,
   Train,
+  Trash2,
   X,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
@@ -105,6 +108,120 @@ const QUICK_DIALOG_PRESETS = [
   },
 ];
 
+const CN_NUM_MAP: Record<string, number> = {
+  零: 0,
+  一: 1,
+  二: 2,
+  兩: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+  十: 10,
+  十一: 11,
+  十二: 12,
+};
+
+function parseChineseHour(raw: string): number {
+  const n = parseInt(raw, 10);
+  if (!isNaN(n)) return n;
+  if (raw in CN_NUM_MAP) return CN_NUM_MAP[raw];
+  if (raw.startsWith('十') && raw.length === 2) {
+    return 10 + (CN_NUM_MAP[raw[1]] || 0);
+  }
+  if (raw.startsWith('二十') && raw.length >= 2) {
+    return 20 + (CN_NUM_MAP[raw[2]] || 0);
+  }
+  return 10;
+}
+
+function parseNaturalTextControls(text: string): {
+  detectedStart?: string;
+  detectedDep?: string;
+  hasReturnKeyword: boolean;
+  detectedMode?: TravelMode;
+} {
+  const clean = (text || '').trim();
+  let detectedMode: TravelMode | undefined;
+  if (/步行|走路|散步|用走的|雙腳/.test(clean)) {
+    detectedMode = 'WALK';
+  } else if (/機車|騎車|摩托車|騎機車/.test(clean)) {
+    detectedMode = 'SCOOTER';
+  } else if (/開車|自駕|汽車/.test(clean)) {
+    detectedMode = 'DRIVE';
+  }
+
+  const timeRegex =
+    /(早上|上午|中午|下午|傍晚|晚上)?\s*(\d{1,2}|二十[一二三四]?|十[一二三四五六七八九]?|[一二兩三四五六七八九])\s*(?:[:：點時])\s*(半|\d{1,2}|[一二三四五]十[一二三四五六七八九]?)?\s*分?/g;
+  const times: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = timeRegex.exec(clean)) !== null) {
+    const period = match[1] || '';
+    let hh = parseChineseHour(match[2]);
+    const minRaw = match[3] || '';
+    let mm = 0;
+    if (minRaw === '半') {
+      mm = 30;
+    } else if (minRaw) {
+      const parsedM = parseInt(minRaw, 10);
+      if (!isNaN(parsedM)) {
+        mm = parsedM;
+      } else if (minRaw.startsWith('三十')) {
+        mm = 30;
+      } else if (minRaw.startsWith('二十')) {
+        mm = 20;
+      } else if (minRaw.startsWith('四十')) {
+        mm = 40;
+      } else if (minRaw.startsWith('五十')) {
+        mm = 50;
+      } else if (minRaw.startsWith('十')) {
+        mm = 10;
+      }
+    }
+
+    if ((period === '下午' || period === '傍晚' || period === '晚上') && hh < 12) {
+      hh += 12;
+    }
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      times.push(
+        `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+      );
+    }
+  }
+
+  const hasReturnKeyword =
+    /回程|坐高鐵|搭高鐵|高鐵回|坐火車|搭火車|火車回|離開|搭車/.test(clean);
+
+  if (times.length >= 2) {
+    return {
+      detectedStart: times[0],
+      detectedDep: times[1],
+      hasReturnKeyword: true,
+      detectedMode,
+    };
+  }
+  if (times.length === 1) {
+    if (hasReturnKeyword && !/到|出發|抵達|去/.test(clean)) {
+      return {
+        detectedDep: times[0],
+        hasReturnKeyword: true,
+        detectedMode,
+      };
+    }
+    return {
+      detectedStart: times[0],
+      detectedDep: hasReturnKeyword ? undefined : '',
+      hasReturnKeyword,
+      detectedMode,
+    };
+  }
+
+  return { hasReturnKeyword, detectedMode };
+}
+
 export function ItineraryPlannerView() {
   const { places, updatePlaceInline } = usePlaces();
 
@@ -131,6 +248,13 @@ export function ItineraryPlannerView() {
     null
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Voice Recognition (Web Speech API) states
+  const [isListening, setIsListening] = useState(false);
+  const [voiceStatusMsg, setVoiceStatusMsg] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
+  const latestTranscriptRef = useRef<string>('');
 
   const activePlan = plans[activePlanIndex] || null;
 
@@ -375,47 +499,247 @@ export function ItineraryPlannerView() {
     );
   };
 
+  const handleIntentTextChange = (newText: string) => {
+    setIntentText(newText);
+    const parsed = parseNaturalTextControls(newText);
+    if (parsed.detectedMode) {
+      setTravelMode(parsed.detectedMode);
+    }
+    if (parsed.detectedStart) {
+      setStartTime(parsed.detectedStart);
+    }
+    if (parsed.detectedDep !== undefined) {
+      setReturnDepartureTime(parsed.detectedDep);
+    }
+  };
+
+  const handleToggleVoiceInput = () => {
+    setErrorMsg(null);
+
+    if (isListening) {
+      // Stop listening and trigger itinerary generation immediately
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+      setIsListening(false);
+      setVoiceStatusMsg('✅ 語音辨識完成！正在為您安排順路行程...');
+      const finalSpoken = latestTranscriptRef.current || intentText;
+      if (finalSpoken.trim()) {
+        const parsed = parseNaturalTextControls(finalSpoken);
+        handleGenerateItinerary({
+          overrideText: finalSpoken,
+          overrideMode: parsed.detectedMode ?? travelMode,
+          overrideStart: parsed.detectedStart ?? startTime,
+          overrideDep:
+            parsed.detectedDep !== undefined
+              ? parsed.detectedDep
+              : returnDepartureTime,
+        });
+      }
+      return;
+    }
+
+    // Start Web Speech API recognition
+    const SpeechRecognitionAPI =
+      typeof window !== 'undefined'
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).SpeechRecognition ||
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).webkitSpeechRecognition
+        : null;
+
+    if (!SpeechRecognitionAPI) {
+      setErrorMsg(
+        '您的瀏覽器不支援直接網頁語音辨識，請點選下方輸入框，再按手機鍵盤右下角的「🎤 麥克風」語音輸入！'
+      );
+      const el = document.getElementById('planner-large-dialog');
+      if (el) el.focus();
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognitionAPI();
+      recognition.lang = 'zh-TW';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      latestTranscriptRef.current = '';
+      setIntentText('');
+      setVoiceStatusMsg('🎙️ 請開始說話（例如：「明天10點半去台南中西區，走路，安排近一點」）...');
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recognition.onresult = (event: any) => {
+        let fullText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          fullText += event.results[i][0].transcript;
+        }
+        const cleaned = fullText.trim();
+        latestTranscriptRef.current = cleaned;
+        setIntentText(cleaned);
+
+        const parsed = parseNaturalTextControls(cleaned);
+        if (parsed.detectedMode) setTravelMode(parsed.detectedMode);
+        if (parsed.detectedStart) setStartTime(parsed.detectedStart);
+        if (parsed.detectedDep !== undefined) {
+          setReturnDepartureTime(parsed.detectedDep);
+        }
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      recognition.onerror = (event: any) => {
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          setErrorMsg(
+            '請允許瀏覽器的「麥克風權限」，或點選輸入框使用手機鍵盤上的「🎤 麥克風」語音輸入。'
+          );
+        } else if (event.error !== 'aborted') {
+          setVoiceStatusMsg('語音辨識已結束，可點擊按鈕重新說話');
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        const finalSpoken = latestTranscriptRef.current.trim();
+        if (finalSpoken) {
+          setVoiceStatusMsg('✅ 已填入您說的行程需求！');
+          const parsed = parseNaturalTextControls(finalSpoken);
+          handleGenerateItinerary({
+            overrideText: finalSpoken,
+            overrideMode: parsed.detectedMode,
+            overrideStart: parsed.detectedStart,
+            overrideDep: parsed.detectedDep,
+          });
+        } else {
+          setVoiceStatusMsg(null);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsListening(true);
+    } catch {
+      setErrorMsg('無法啟動麥克風，請確認瀏覽器麥克風權限或使用手機鍵盤語音輸入');
+      setIsListening(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* ==================== 大字版 AI 排程對話窗 ==================== */}
-      <section className="rounded-3xl border-2 border-amber-400/80 bg-white p-5 sm:p-6 shadow-sm space-y-5">
+      <section className="rounded-3xl border-2 border-amber-400/80 bg-white p-4 sm:p-6 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-xs">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-xs shrink-0">
               <Sparkles className="h-6 w-6" />
             </span>
             <div>
-              <h2 className="text-xl sm:text-2xl font-extrabold text-stone-900">
-                🗣️ 直接用說的排行程（支援指定時間、交通工具、高鐵／火車／飯店）
+              <h2 className="text-lg sm:text-2xl font-extrabold text-stone-900 leading-snug">
+                🗣️ 直接用說的排行程
               </h2>
+              <p className="text-xs sm:text-sm font-bold text-stone-500">
+                支援語音開口說或打字（自動辨識時間、交通工具、高鐵／火車／飯店）
+              </p>
             </div>
           </div>
 
-          {sessionSkippedIds.length > 0 && (
+          {/* 🎤 超醒目語音輸入大按鈕 ＋ 清空按鈕 */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
+              id="btn-voice-dictation"
               type="button"
-              onClick={() => {
-                setSessionSkippedIds([]);
-                handleGenerateItinerary({ overrideSkipped: [] });
-              }}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-100 px-3.5 py-2 text-base font-bold text-stone-700 hover:bg-stone-200 cursor-pointer"
+              onClick={handleToggleVoiceInput}
+              className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-base sm:text-lg font-extrabold shadow-xs transition-all cursor-pointer ${
+                isListening
+                  ? 'bg-rose-600 text-white animate-pulse ring-4 ring-rose-200'
+                  : 'bg-rose-600 text-white hover:bg-rose-700'
+              }`}
             >
-              <RotateCcw className="h-4 w-4" />
-              復原換掉的店 ({sessionSkippedIds.length})
+              {isListening ? (
+                <>
+                  <MicOff className="h-5 w-5 shrink-0" />
+                  <span>🔴 正在聽您說... (點此完成)</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="h-5 w-5 shrink-0" />
+                  <span>🎤 點此開口說行程</span>
+                </>
+              )}
             </button>
-          )}
+
+            {intentText && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIntentText('');
+                  setVoiceStatusMsg(null);
+                  const el = document.getElementById('planner-large-dialog');
+                  if (el) el.focus();
+                }}
+                title="清空輸入框"
+                className="inline-flex items-center gap-1 rounded-2xl border-2 border-stone-300 bg-stone-50 px-3 py-2.5 text-sm sm:text-base font-extrabold text-stone-600 hover:bg-stone-100 cursor-pointer shrink-0"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>清空</span>
+              </button>
+            )}
+
+            {sessionSkippedIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSessionSkippedIds([]);
+                  handleGenerateItinerary({ overrideSkipped: [] });
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-100 px-3 py-2 text-sm font-bold text-stone-700 hover:bg-stone-200 cursor-pointer"
+              >
+                <RotateCcw className="h-4 w-4" />
+                復原 ({sessionSkippedIds.length})
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* 語音即時狀態提示條 */}
+        {voiceStatusMsg && (
+          <div
+            className={`rounded-2xl px-4 py-2.5 text-sm sm:text-base font-extrabold flex items-center justify-between gap-2 ${
+              isListening
+                ? 'bg-rose-50 border-2 border-rose-300 text-rose-900'
+                : 'bg-emerald-50 border border-emerald-300 text-emerald-900'
+            }`}
+          >
+            <span>{voiceStatusMsg}</span>
+            {isListening && (
+              <button
+                type="button"
+                onClick={handleToggleVoiceInput}
+                className="rounded-xl bg-rose-600 px-3 py-1 text-xs sm:text-sm font-extrabold text-white shrink-0"
+              >
+                說完了・開始排程
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 超大對話輸入框 */}
         <div className="space-y-3">
-          <textarea
-            id="planner-large-dialog"
-            rows={3}
-            value={intentText}
-            onChange={(e) => setIntentText(e.target.value)}
-            placeholder="請直接輸入您的旅遊計畫，例如：&#10;「我明天 10:30 到台南，16:30 要坐高鐵回程，交通工具是機車，中餐想吃六千牛肉湯」"
-            className="w-full rounded-2xl border-2 border-stone-300 bg-stone-50/70 p-4 text-lg sm:text-xl font-bold text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:outline-none leading-relaxed"
-          />
+          <div className="relative">
+            <textarea
+              id="planner-large-dialog"
+              rows={3}
+              value={intentText}
+              onChange={(e) => handleIntentTextChange(e.target.value)}
+              placeholder="點擊上方「🎤 點此開口說行程」，或直接打字輸入：&#10;「明天 10:30 要去台南旅遊，大概都是在中西區活動，交通工具是步行，所以安排近一點的地點」"
+              className={`w-full rounded-2xl border-2 p-4 text-lg sm:text-xl font-bold text-stone-900 placeholder:text-stone-400 focus:outline-none leading-relaxed transition-colors ${
+                isListening
+                  ? 'border-rose-500 bg-rose-50/40'
+                  : 'border-stone-300 bg-stone-50/70 focus:border-amber-600 focus:bg-white'
+              }`}
+            />
+          </div>
 
           {/* 抵達時間、回程時間、交通工具 與 開始排程大按鈕 */}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-stone-100/90 p-3.5 border border-stone-200">
