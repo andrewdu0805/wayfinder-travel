@@ -101,7 +101,7 @@ export function ItineraryPlannerView() {
     null
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showTripSettings, setShowTripSettings] = useState(true);
+  const [showTripSettings, setShowTripSettings] = useState(false);
   const [customHotelInput, setCustomHotelInput] = useState('');
   const [isLookingUpHotel, setIsLookingUpHotel] = useState(false);
 
@@ -744,27 +744,47 @@ export function ItineraryPlannerView() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-1.5 w-full sm:w-auto">
             <button
               id="btn-voice-dictation"
               type="button"
               onClick={handleToggleVoiceInput}
-              className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-base sm:text-lg font-extrabold shadow-xs transition-all cursor-pointer bg-rose-600 text-white hover:bg-rose-700 ${
+              className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-sm sm:text-base font-extrabold shadow-xs transition-all cursor-pointer bg-rose-600 text-white hover:bg-rose-700 whitespace-nowrap ${
                 isListening ? 'animate-pulse ring-4 ring-rose-200' : ''
               }`}
             >
               {isListening ? (
                 <>
-                  <MicOff className="h-5 w-5 shrink-0" />
+                  <MicOff className="h-4 w-4 shrink-0" />
                   <span>🔴 正在聽... (點此完成)</span>
                 </>
               ) : (
                 <>
-                  <Mic className="h-5 w-5 shrink-0" />
-                  <span>🎤 點此開口說行程</span>
+                  <Mic className="h-4 w-4 shrink-0" />
+                  <span>🎤 開口說行程</span>
                 </>
               )}
             </button>
+
+            {/* 極簡範例下拉選單（不佔任何額外高度） */}
+            <select
+              aria-label="載入範例行程"
+              value=""
+              disabled={isGenerating}
+              onChange={(e) => {
+                if (e.target.value) {
+                  applyFullSentence(e.target.value);
+                }
+              }}
+              className="w-24 sm:w-28 rounded-xl border-2 border-stone-300 bg-stone-50 px-2 py-2 text-xs sm:text-sm font-extrabold text-stone-700 hover:bg-stone-100 cursor-pointer shrink-0"
+            >
+              <option value="">💡 範例</option>
+              {QUICK_DIALOG_PRESETS.map((preset, i) => (
+                <option key={i} value={preset.text}>
+                  {preset.badge}
+                </option>
+              ))}
+            </select>
 
             {intentText && (
               <button
@@ -775,9 +795,9 @@ export function ItineraryPlannerView() {
                   document.getElementById('planner-large-dialog')?.focus();
                 }}
                 title="清空輸入框"
-                className="inline-flex items-center gap-1 rounded-2xl border-2 border-stone-300 bg-stone-50 px-3 py-2.5 text-sm sm:text-base font-extrabold text-stone-600 hover:bg-stone-100 cursor-pointer shrink-0"
+                className="inline-flex items-center gap-1 rounded-xl border-2 border-stone-300 bg-stone-50 px-2.5 py-2 text-xs sm:text-sm font-extrabold text-stone-600 hover:bg-stone-100 cursor-pointer shrink-0 whitespace-nowrap"
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-3.5 w-3.5" />
                 <span>清空</span>
               </button>
             )}
@@ -807,11 +827,11 @@ export function ItineraryPlannerView() {
 
         <textarea
           id="planner-large-dialog"
-          rows={3}
+          rows={2}
           value={intentText}
           onChange={(e) => handleIntentTextChange(e.target.value)}
-          placeholder="點擊上方「🎤 點此開口說行程」，或直接打字：&#10;「明天 10:30 坐高鐵到台南，住台南大飯店兩晚，第三天下午 4 點半搭高鐵回去，騎機車」"
-          className={`w-full rounded-2xl border-2 p-4 text-lg sm:text-xl font-bold text-stone-900 placeholder:text-stone-400 focus:outline-none leading-relaxed transition-colors ${
+          placeholder="點擊上方「🎤 開口說行程」，或直接打字：&#10;「明天 10:30 坐高鐵到台南，住台南大飯店兩晚，第三天下午 4 點半搭高鐵回去，騎機車」"
+          className={`w-full rounded-2xl border-2 p-3 sm:p-4 text-base sm:text-lg font-bold text-stone-900 placeholder:text-stone-400 focus:outline-none leading-snug transition-colors ${
             isListening
               ? 'border-rose-500 bg-rose-50/40'
               : 'border-stone-300 bg-stone-50/70 focus:border-amber-600 focus:bg-white'
@@ -819,22 +839,24 @@ export function ItineraryPlannerView() {
         />
 
         {/* ---------- 旅程設定（文字／語音會自動同步到這裡，也可手動調整） ---------- */}
-        <div className="rounded-2xl bg-stone-100/90 border border-stone-200 p-3 sm:p-4 space-y-3">
+        <div className="rounded-2xl bg-stone-100/90 border border-stone-200 p-3 space-y-2.5">
           <button
             type="button"
             onClick={() => setShowTripSettings((v) => !v)}
             className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
           >
-            <span className="inline-flex items-center gap-1.5 text-base sm:text-lg font-extrabold text-stone-900">
-              <CalendarDays className="h-5 w-5 text-amber-700" />
-              {dest.shortLabel}・{nightsLabel(trip.numDays)}
+            <span className="inline-flex items-center gap-1.5 text-sm sm:text-base font-extrabold text-stone-900 min-w-0">
+              <CalendarDays className="h-4 w-4 text-amber-700 shrink-0" />
+              <span className="whitespace-nowrap">
+                {dest.city.replace(/[市縣府]$/, '')}・{nightsLabel(trip.numDays)}
+              </span>
               {isMultiDay && (
-                <span className="text-sm font-bold text-stone-500 truncate">
+                <span className="text-xs sm:text-sm font-bold text-stone-500 truncate">
                   ｜{shortAnchorName(trip.hotel)}
                 </span>
               )}
             </span>
-            <span className="text-sm font-bold text-amber-700 shrink-0">
+            <span className="text-xs sm:text-sm font-bold text-amber-700 shrink-0 whitespace-nowrap">
               {showTripSettings ? '收合 ▲' : '調整 ▼'}
             </span>
           </button>
@@ -1073,7 +1095,7 @@ export function ItineraryPlannerView() {
               setSessionSkippedIds([]);
               generateAllDays(trip, intentText, []);
             }}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-6 py-3 text-lg font-extrabold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50 transition-all cursor-pointer"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-base sm:text-lg font-extrabold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50 transition-all cursor-pointer"
           >
             {isGenerating ? (
               <>
@@ -1087,30 +1109,6 @@ export function ItineraryPlannerView() {
               </>
             )}
           </button>
-        </div>
-
-        {/* 範例 */}
-        <div className="space-y-2">
-          <div className="text-sm sm:text-base font-extrabold text-stone-500">
-            💡 點擊範例直接測試：
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {QUICK_DIALOG_PRESETS.map((preset, i) => (
-              <button
-                key={i}
-                type="button"
-                disabled={isGenerating}
-                onClick={() => applyFullSentence(preset.text)}
-                className={`rounded-xl border px-3 py-1.5 text-sm font-bold transition-all cursor-pointer text-left disabled:opacity-50 ${
-                  intentText === preset.text
-                    ? 'border-amber-600 bg-amber-50 text-amber-950 font-extrabold'
-                    : 'border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100'
-                }`}
-              >
-                {preset.badge}
-              </button>
-            ))}
-          </div>
         </div>
       </section>
 
