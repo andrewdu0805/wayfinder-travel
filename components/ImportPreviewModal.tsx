@@ -435,10 +435,13 @@ export function ImportPreviewModal({
                         <option value="bar">🍸 暢飲酒吧</option>
                       </select>
 
-                      {/* User Notes */}
-                      {p.user_notes && p.user_notes !== '由 CSV 清單匯入' && (
-                        <span className="text-stone-500 truncate max-w-[200px]">
-                          💬 {p.user_notes}
+                      {/* User Notes / Google Maps Highlights */}
+                      {p.user_notes && (
+                        <span
+                          className="text-stone-600 truncate max-w-[280px] sm:max-w-md text-xs font-medium"
+                          title={p.user_notes}
+                        >
+                          📝 {p.user_notes}
                         </span>
                       )}
                     </div>

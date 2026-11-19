@@ -26,6 +26,7 @@ import {
   inferPlaceCategoryByName,
   separateNameAndAddress,
 } from '@/lib/geo-utils';
+import { resolvePlaceDescription } from '@/lib/place-notes';
 
 const STORAGE_KEYS = {
   PLACES: 'antigravity_travel_places_v1',
@@ -225,6 +226,24 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     }
   }
 
+  // 5. Google Maps-style Note & Description Auto-Resolution:
+  // If notes are empty or generic import placeholders like "由 CSV 清單匯入", automatically resolve a rich Google Maps description!
+  let nextNotes = p.user_notes || '';
+  if (
+    !nextNotes ||
+    nextNotes === '由 CSV 清單匯入' ||
+    nextNotes === '由 Google Takeout 匯入' ||
+    nextNotes === '透過智慧快速輸入新增'
+  ) {
+    nextNotes = resolvePlaceDescription(
+      nextName,
+      nextCity,
+      nextDist,
+      nextSub,
+      nextAddr
+    );
+  }
+
   return {
     ...p,
     name: nextName,
@@ -236,6 +255,7 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     primary_category: nextPrimary,
     sub_category: nextSub,
     estimated_stay_mins: nextStay,
+    user_notes: nextNotes,
   };
 }
 
@@ -413,6 +433,20 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                 rating: enriched.rating ?? p.rating,
                 opening_hours_json:
                   enriched.opening_hours_json || p.opening_hours_json,
+                user_notes:
+                  enriched.user_notes &&
+                  enriched.user_notes !== '由 CSV 清單匯入' &&
+                  enriched.user_notes !== '由 Google Takeout 匯入' &&
+                  enriched.user_notes !== '透過智慧快速輸入新增'
+                    ? enriched.user_notes
+                    : p.user_notes ||
+                      resolvePlaceDescription(
+                        enriched.name || p.name,
+                        enriched.city || p.city,
+                        enriched.district || p.district,
+                        enriched.sub_category || p.sub_category,
+                        enriched.formatted_address || p.formatted_address
+                      ),
               });
               setPlaces((prev) =>
                 prev.map((p) => (p.id === item.id ? applyEnriched(p) : p))

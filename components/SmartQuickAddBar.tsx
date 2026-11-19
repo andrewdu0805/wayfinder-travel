@@ -22,6 +22,7 @@ import {
 } from '@/lib/geo-utils';
 import { SavedPlace, VisitStatus } from '@/types/place';
 import { ImportPreviewModal } from '@/components/ImportPreviewModal';
+import { resolvePlaceDescription } from '@/lib/place-notes';
 
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
@@ -227,7 +228,17 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
                   `${title} ${region.city}`
                 )}`,
               user_notes:
-                props.Comment || props.Note || props.note || '由 Google Takeout 匯入',
+                (props.Comment || props.Note || props.note) &&
+                props.Comment !== '由 Google Takeout 匯入' &&
+                props.Note !== '由 Google Takeout 匯入'
+                  ? props.Comment || props.Note || props.note
+                  : resolvePlaceDescription(
+                      title,
+                      region.city,
+                      region.district,
+                      cat.sub_category,
+                      rawAddress
+                    ),
               custom_tags: ['#Takeout匯入'],
               last_visited_at: null,
               hours_updated_at: nowIso,
@@ -355,7 +366,16 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
               `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
                 `${title} ${region.city}`
               )}`,
-            user_notes: note || '由 CSV 清單匯入',
+            user_notes:
+              note && note !== '由 CSV 清單匯入'
+                ? note
+                : resolvePlaceDescription(
+                    title,
+                    region.city,
+                    region.district,
+                    cat.sub_category,
+                    sep.foundAddress
+                  ),
             custom_tags: ['#CSV匯入'],
             last_visited_at: null,
             hours_updated_at: nowIso,

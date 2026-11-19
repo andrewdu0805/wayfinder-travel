@@ -6,6 +6,7 @@ import {
   getCoordinatesForRegion,
   separateNameAndAddress,
 } from '@/lib/geo-utils';
+import { resolvePlaceDescription } from '@/lib/place-notes';
 import { CategoryConfig, SavedPlace, VisitStatus } from '@/types/place';
 import { DEFAULT_CATEGORY_CONFIGS } from '@/lib/default-data';
 
@@ -471,6 +472,7 @@ export async function POST(req: NextRequest) {
 3. 若為主題樂園，primary_category 為 "theme_park_leisure"，sub_category 為 "amusement_park"。
 4. 若備註有明確提到「去過」，則 visit_status 為 "visited_revisit"，否則預設為 "unvisited"。
 5. 【極重要】name 欄位「絕對不可」包含任何縣市、鄉鎮市區、村里鄰、路街段巷弄號、大道或郵遞區號等地址字串（例如若輸入為「臺南市中正路1號永華里湯德章大道國立臺灣文學館」，name 必須僅為「國立臺灣文學館 National Museum of Taiwan Literature」，地址請放入 addressHint）。若系統已提供「[系統預先分離純店名]」，請優先採用該純店名。
+6. 【說明備註 user_notes】：若使用者輸入未包含個人特殊備註，請結合 Google Maps 上的店家特點、招牌必吃推薦或景點特色，為該地點寫一句 15~35 字生動精準的 Google Maps 風格亮點說明句（例如：「夏林路傳承40餘年老字號米糕，米糕Q彈淋上濃郁肉燥配旗魚鬆與四神湯」、「人氣創意調酒餐酒館，以電影為靈感設計特色特調與下酒料理」），切勿留空或填寫敷衍罐頭文字。
 預設所在城市提示：${defaultCity}
 
 使用者輸入內容：
@@ -723,7 +725,7 @@ ${resolvedInput}`,
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': googleMapsApiKey,
                 'X-Goog-FieldMask':
-                  'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus',
+                  'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.editorialSummary',
               },
               body: JSON.stringify(requestBody),
               signal: AbortSignal.timeout(5000),
@@ -752,6 +754,9 @@ ${resolvedInput}`,
                 region.city = officialRegion.city;
                 region.district = officialRegion.district;
                 region.country = officialRegion.country;
+              }
+              if (top.editorialSummary?.text) {
+                cand.user_notes = top.editorialSummary.text;
               }
               rating = top.rating ?? rating;
               if (top.regularOpeningHours?.weekdayDescriptions) {
@@ -886,7 +891,19 @@ ${resolvedInput}`,
         google_maps_url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
           `${cand.name} ${region.city}`
         )}`,
-        user_notes: cand.user_notes,
+        user_notes:
+          cand.user_notes &&
+          cand.user_notes !== '透過智慧快速輸入新增' &&
+          cand.user_notes !== '由 CSV 清單匯入' &&
+          cand.user_notes !== '由 Google Takeout 匯入'
+            ? cand.user_notes
+            : resolvePlaceDescription(
+                cand.name,
+                region.city,
+                region.district,
+                cand.sub_category,
+                formattedAddress
+              ),
         custom_tags: cand.custom_tags || [],
         last_visited_at: null,
         hours_updated_at: nowIso,
