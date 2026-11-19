@@ -23,6 +23,7 @@ import {
 import { SavedPlace, VisitStatus } from '@/types/place';
 import { ImportPreviewModal } from '@/components/ImportPreviewModal';
 import { resolvePlaceDescription } from '@/lib/place-notes';
+import { resolvePlaceFromGoogleMapsUrl } from '@/lib/place-resolver';
 
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
@@ -252,6 +253,14 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
           .split(/\r?\n/)
           .map((l) => l.trim())
           .filter(Boolean);
+
+        const batchRows: Array<{
+          url: string;
+          title: string;
+          note: string;
+          rowCoords: { lat: number; lng: number } | null;
+        }> = [];
+
         for (let i = 0; i < lines.length; i++) {
           const cols = parseCsvLine(lines[i]);
           const firstCol = (cols[0] || '').trim();
@@ -269,7 +278,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
           let foundUrl = '';
 
           for (let c = 0; c < cols.length; c++) {
-            const val = cols[c] || '';
+            const val = (cols[c] || '').trim();
             if (/https?:\/\/[^\s)]+/i.test(val)) {
               if (!foundUrl) foundUrl = val;
               const extracted = extractCoordsFromGoogleMapsUrl(val);
@@ -295,93 +304,54 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
           }
 
           const url = foundUrl || cols[2] || '';
-          let decodedUrl = url;
-          try {
-            decodedUrl = decodeURIComponent(url);
-          } catch {}
-
-          // Recover real Chinese place name if firstCol is corrupted by Big5 / ANSI Excel export
-          let recoveredName = '';
-          if (url) {
-            try {
-              const placeMatch = url.match(/\/maps\/place\/([^/?#]+)/);
-              if (placeMatch) {
-                const dec = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '));
-                if (dec && !/^0x[0-9a-f]+:0x[0-9a-f]+/i.test(dec)) {
-                  recoveredName = dec;
-                }
-              }
-              if (!recoveredName) {
-                const queryMatch = url.match(/[?&]query=([^&#]+)/);
-                if (queryMatch) {
-                  const dec = decodeURIComponent(queryMatch[1].replace(/\+/g, ' '));
-                  if (dec) recoveredName = dec;
-                }
-              }
-            } catch {}
-          }
-
-          const hasMojibake =
-            /[?？]/.test(firstCol) || /[\u4e00-\u9fa5]+[?？]/.test(firstCol);
-          const sep = separateNameAndAddress(firstCol);
-          // Prefer recovered official name from Google Maps URL to prevent Big5/ANSI Excel mojibake (e.g. 握 懷 -> 布雷夫烘焙)
-          const title =
-            recoveredName || (hasMojibake ? recoveredName : sep.cleanName || firstCol);
-
-          const region = extractRegionFromAddress(
-            `${sep.foundAddress || ''} ${title} ${firstCol} ${note} ${decodedUrl}`,
+          batchRows.push({
+            url,
+            title: firstCol,
+            note,
             rowCoords,
-            fallbackCity
-          );
-          const coords =
-            rowCoords ||
-            getCoordinatesForRegion(region.city, region.district, title);
-          const cat = inferPlaceCategoryByName(`${title} ${note}`);
-
-          imported.push({
-            id: `csv-${Date.now()}-${i}`,
-            google_place_id: url || `csv_${title}`,
-            name: title,
-            formatted_address:
-              sep.foundAddress ||
-              `${region.country}${region.city}${region.district}`,
-            country: region.country,
-            city: region.city,
-            district: region.district,
-            latitude: coords.lat,
-            longitude: coords.lng,
-            primary_category: cat.primary_category,
-            sub_category: cat.sub_category,
-            visit_status: 'unvisited',
-            business_status: 'OPERATIONAL',
-            estimated_stay_mins: cat.estimated_stay_mins,
-            rating: 4.5,
-            opening_hours_json: {
-              open_now: true,
-              weekday_descriptions: ['每日 10:00–21:00'],
-              daily_hours: { open: '10:00', close: '21:00' },
-            },
-            google_maps_url:
-              url ||
-              `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                `${title} ${region.city}`
-              )}`,
-            user_notes:
-              note && note !== '由 CSV 清單匯入'
-                ? note
-                : resolvePlaceDescription(
-                    title,
-                    region.city,
-                    region.district,
-                    cat.sub_category,
-                    sep.foundAddress
-                  ),
-            custom_tags: ['#CSV匯入'],
-            last_visited_at: null,
-            hours_updated_at: nowIso,
-            created_at: nowIso,
-            updated_at: nowIso,
           });
+        }
+
+        // Batch Google Maps URL resolution: URL is the primary authority, exactly matching single URL paste!
+        setIsParsing(true);
+        try {
+          const res = await fetch('/api/smart-parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              batch: batchRows,
+              defaultCity: fallbackCity,
+              categoryConfigs,
+              googleMapsApiKey: settings.googleMapsApiKey,
+              geminiApiKey: settings.geminiApiKey,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.places) && data.places.length > 0) {
+              imported.push(...data.places);
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('Batch parse server fetch error, falling back to local resolver:', fetchErr);
+        } finally {
+          setIsParsing(false);
+        }
+
+        // If server was offline or returned empty, resolve locally with identical URL-first logic!
+        if (imported.length === 0 && batchRows.length > 0) {
+          for (const row of batchRows) {
+            const resolved = resolvePlaceFromGoogleMapsUrl({
+              url: row.url,
+              fallbackTitle: row.title,
+              userNote: row.note,
+              defaultCity: fallbackCity,
+              categoryConfigs,
+              customTags: ['#GoogleMaps匯入'],
+              rowCoords: row.rowCoords,
+            });
+            imported.push(resolved);
+          }
         }
       }
 
@@ -522,11 +492,21 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
               <button
                 id="btn-select-import-file"
                 type="button"
+                disabled={isParsing}
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-xs sm:text-sm font-bold text-white hover:bg-teal-800 transition-colors shadow-xs cursor-pointer"
+                className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-xs sm:text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50 transition-colors shadow-xs cursor-pointer"
               >
-                <Upload className="h-4 w-4" />
-                選擇檔案並整理
+                {isParsing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    依據網址批次解析中...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4" />
+                    選擇檔案並整理
+                  </>
+                )}
               </button>
             </div>
           </div>

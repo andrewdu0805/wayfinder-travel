@@ -7,6 +7,7 @@ import {
   separateNameAndAddress,
 } from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
+import { resolvePlaceFromGoogleMapsUrl } from '@/lib/place-resolver';
 import { CategoryConfig, SavedPlace, VisitStatus } from '@/types/place';
 import { DEFAULT_CATEGORY_CONFIGS } from '@/lib/default-data';
 
@@ -283,6 +284,97 @@ export async function POST(req: NextRequest) {
       body.geminiApiKey || process.env.GEMINI_API_KEY || '';
     const googleMapsApiKey =
       body.googleMapsApiKey || process.env.GOOGLE_MAPS_API_KEY || '';
+
+    // 0. Batch Google Maps URL Mode (used for CSV Takeout batch import)
+    // Ensures that every row in the CSV is processed with the exact same authority and logic as single URL paste!
+    if (Array.isArray(body.batch) && body.batch.length > 0) {
+      const parsedBatch: SavedPlace[] = [];
+      const nowIso = new Date().toISOString();
+
+      for (const item of body.batch) {
+        const itemUrl = String(item.url || '').trim();
+        const itemTitle = String(item.title || '').trim();
+        const itemNote = String(item.note || '').trim();
+
+        // 1. Check BUILTIN_GAZETTEER
+        const matchedTpl = BUILTIN_GAZETTEER.find((tpl) =>
+          tpl.keywords.some((kw) =>
+            (itemTitle + ' ' + itemUrl).toLowerCase().includes(kw.toLowerCase())
+          )
+        );
+
+        if (matchedTpl) {
+          const region = extractRegionFromAddress(matchedTpl.formatted_address);
+          const heuristic = inferCategoryHeuristic(
+            `${matchedTpl.name} ${itemNote}`,
+            categoryConfigs
+          );
+          parsedBatch.push({
+            id: `place-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            google_place_id: matchedTpl.google_place_id,
+            name: matchedTpl.name,
+            formatted_address: matchedTpl.formatted_address,
+            country: region.country,
+            city: region.city,
+            district: region.district,
+            latitude: matchedTpl.latitude,
+            longitude: matchedTpl.longitude,
+            primary_category: matchedTpl.primary_category,
+            sub_category: matchedTpl.sub_category,
+            visit_status: 'unvisited',
+            business_status: 'OPERATIONAL',
+            estimated_stay_mins: matchedTpl.estimated_stay_mins,
+            rating: matchedTpl.rating,
+            opening_hours_json: {
+              open_now: true,
+              weekday_descriptions: [
+                `每日 ${matchedTpl.daily_hours.open}–${matchedTpl.daily_hours.close}`,
+              ],
+              daily_hours: matchedTpl.daily_hours,
+            },
+            google_maps_url:
+              itemUrl ||
+              `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                `${matchedTpl.name} ${region.city}`
+              )}`,
+            user_notes:
+              itemNote && itemNote !== '由 CSV 清單匯入'
+                ? itemNote
+                : resolvePlaceDescription(
+                    matchedTpl.name,
+                    region.city,
+                    region.district,
+                    matchedTpl.sub_category,
+                    matchedTpl.formatted_address
+                  ),
+            custom_tags: ['#GoogleMaps匯入', ...matchedTpl.tags],
+            last_visited_at: null,
+            hours_updated_at: nowIso,
+            created_at: nowIso,
+            updated_at: nowIso,
+          });
+          continue;
+        }
+
+        // 2. Primary Authority: Resolve Place from Google Maps URL
+        const resolved = resolvePlaceFromGoogleMapsUrl({
+          url: itemUrl,
+          fallbackTitle: itemTitle,
+          userNote: itemNote,
+          defaultCity,
+          categoryConfigs,
+          customTags: ['#GoogleMaps匯入'],
+          rowCoords: item.rowCoords || null,
+        });
+
+        parsedBatch.push(resolved);
+      }
+
+      return NextResponse.json({
+        places: parsedBatch,
+        mode: 'batch_url_resolver',
+      });
+    }
 
     if (!rawInput) {
       return NextResponse.json(

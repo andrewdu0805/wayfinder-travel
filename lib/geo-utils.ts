@@ -782,7 +782,71 @@ export function extractCoordsFromGoogleMapsUrl(
     }
   }
 
+  // 5. ?q=<lat>,<lng>, &query=<lat>,<lng>, or ?ll=<lat>,<lng>
+  const qCoordMatch = str.match(
+    /[?&](?:q|query|ll)=(?:loc:)?([0-9.-]+)[,\s]+([0-9.-]+)/
+  );
+  if (qCoordMatch) {
+    const lat = parseFloat(qCoordMatch[1]);
+    const lng = parseFloat(qCoordMatch[2]);
+    if (!isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 85) {
+      return { lat, lng };
+    }
+  }
+
   return null;
+}
+
+/**
+ * Extracts pure place/store name from any Google Maps URL.
+ */
+export function extractPlaceNameFromGoogleMapsUrl(url: string): string {
+  if (!url) return '';
+  let str = url;
+  try {
+    str = decodeURIComponent(url);
+  } catch {}
+
+  // 1. /maps/place/<name>
+  const placeMatch = str.match(/\/maps\/place\/([^/?#@]+)/);
+  if (placeMatch) {
+    const raw = placeMatch[1].replace(/\+/g, ' ').trim();
+    if (
+      raw &&
+      !/^0x[0-9a-f]+:0x[0-9a-f]+/i.test(raw) &&
+      !/^[0-9.-]+,\s*[0-9.-]+$/.test(raw)
+    ) {
+      return raw;
+    }
+  }
+
+  // 2. /maps/search/<name>
+  const searchMatch = str.match(/\/maps\/search\/([^/?#@]+)/);
+  if (searchMatch) {
+    const raw = searchMatch[1].replace(/\+/g, ' ').trim();
+    if (
+      raw &&
+      !/^0x[0-9a-f]+:0x[0-9a-f]+/i.test(raw) &&
+      !/^[0-9.-]+,\s*[0-9.-]+$/.test(raw)
+    ) {
+      return raw;
+    }
+  }
+
+  // 3. ?q=<name> or ?query=<name>
+  const qMatch = str.match(/[?&](?:query|q)=([^&#]+)/);
+  if (qMatch) {
+    const raw = qMatch[1].replace(/\+/g, ' ').trim();
+    if (
+      raw &&
+      !/^0x[0-9a-f]+:0x[0-9a-f]+/i.test(raw) &&
+      !/^[0-9.-]+,\s*[0-9.-]+$/.test(raw)
+    ) {
+      return raw;
+    }
+  }
+
+  return '';
 }
 
 /**
