@@ -32,6 +32,16 @@ export const DEFAULT_CATEGORY_CONFIGS: CategoryConfig[] = [
     sort_order: 30,
   },
   {
+    id: 'restaurant:bar',
+    primary_category: 'restaurant',
+    primary_label: '餐廳與飲食',
+    sub_category: 'bar',
+    sub_label: '暢飲酒吧／夜生活',
+    default_stay_mins: 90,
+    icon_name: 'Wine',
+    sort_order: 35,
+  },
+  {
     id: 'museum_culture:museum',
     primary_category: 'museum_culture',
     primary_label: '展館與文化',

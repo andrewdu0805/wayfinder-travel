@@ -1770,6 +1770,17 @@ export function inferPlaceCategoryByName(text: string): {
       estimated_stay_mins: 90,
     };
   }
+  if (
+    /餐酒|酒吧|bistro|\bbar\b|居酒屋|啤酒|精釀|小酌|調酒|\bpub\b|\bwine\b|\bbeer\b|酉|微醺|釀造|酒造|品酒|bottle|瓶子|選酒|自然酒|紅白酒|葡萄酒|洋酒|烈酒|清酒|威士忌|whisky|whiskey|cocktail|gin|sake|taproom|draft|酒館|酒莊/.test(
+      lower
+    )
+  ) {
+    return {
+      primary_category: 'restaurant',
+      sub_category: 'bar',
+      estimated_stay_mins: 90,
+    };
+  }
   return {
     primary_category: 'restaurant',
     sub_category: 'meal',

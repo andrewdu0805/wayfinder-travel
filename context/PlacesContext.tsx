@@ -358,7 +358,19 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       if (rawCats !== null) {
         const parsedCats = JSON.parse(rawCats);
         if (Array.isArray(parsedCats) && parsedCats.length > 0) {
-          setCategoryConfigs(parsedCats);
+          const existingSubs = new Set(
+            parsedCats.map((c: CategoryConfig) => c.sub_category)
+          );
+          const mergedCats = [...parsedCats];
+          for (const defCfg of DEFAULT_CATEGORY_CONFIGS) {
+            if (!existingSubs.has(defCfg.sub_category)) {
+              mergedCats.push(defCfg);
+            }
+          }
+          mergedCats.sort(
+            (a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99)
+          );
+          setCategoryConfigs(mergedCats);
         }
       }
       const rawSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS);
