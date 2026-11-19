@@ -250,10 +250,244 @@ const LANDMARK_OR_ROAD_TO_DISTRICT: Array<{
     city: '高雄市',
     district: '鼓山區',
   },
+  // 台北市各行政區路名、捷運站與地標
+  {
+    keywords: [
+      '民生東路一段',
+      '民生東路二段',
+      '民生東路三段',
+      '某咖啡',
+      'Mau Coffee',
+      "ED's Diner",
+      '樂群二路',
+      '樂群三路',
+      '敬業三路',
+      '大直',
+      '松江路',
+      '南京東路一段',
+      '南京東路二段',
+      '南京東路三段',
+      '林森北路',
+      '中山北路一段',
+      '中山北路二段',
+      '中山北路三段',
+      '長安東路',
+      '農安街',
+      '雙城街',
+      '行天宮',
+      '松江南京',
+      '中山國中',
+      '劍南路',
+      '晴光市場',
+      '條通',
+    ],
+    city: '台北市',
+    district: '中山區',
+  },
+  {
+    keywords: [
+      '信義安和',
+      'The Slice Shop',
+      '元意餐廳',
+      '安和路',
+      '敦化南路',
+      '仁愛路三段',
+      '仁愛路四段',
+      '忠孝東路三段',
+      '忠孝東路四段',
+      '大安路',
+      '延吉街',
+      '光復南路',
+      '永康街',
+      '金華街',
+      '麗水街',
+      '潮州街',
+      '和平東路',
+      '新生南路',
+      '羅斯福路三段',
+      '師大',
+      '公館',
+      '東門',
+      '科技大樓',
+      '六張犁',
+      '通化街',
+      '臨江街',
+      '大安森林公園',
+    ],
+    city: '台北市',
+    district: '大安區',
+  },
+  {
+    keywords: [
+      '碧山巖',
+      '碧山路',
+      '白石湖',
+      '大湖公園',
+      '內湖路',
+      '瑞光路',
+      '成功路',
+      '民權東路六段',
+      '康寧路',
+      '東湖',
+      '西湖',
+      '港墘',
+      '文德',
+      '葫洲',
+      '金面山',
+    ],
+    city: '台北市',
+    district: '內湖區',
+  },
+  {
+    keywords: [
+      '台北101',
+      '世貿',
+      '象山',
+      '信義路五段',
+      '松壽路',
+      '松智路',
+      '松仁路',
+      '松高路',
+      '忠孝東路五段',
+      '基隆路一段',
+      '永吉路',
+      '吳興街',
+      '四四南村',
+      '市政府',
+      '永春',
+      '後山埤',
+    ],
+    city: '台北市',
+    district: '信義區',
+  },
+  {
+    keywords: [
+      '民生東路四段',
+      '民生東路五段',
+      '民生社區',
+      '富錦街',
+      '新中街',
+      '延壽街',
+      '三民路',
+      '南京東路四段',
+      '南京東路五段',
+      '敦化北路',
+      '八德路三段',
+      '八德路四段',
+      '饒河街',
+      '松山車站',
+      '小巨蛋',
+      '南京三民',
+    ],
+    city: '台北市',
+    district: '松山區',
+  },
+  {
+    keywords: [
+      '迪化街',
+      '大稻埕',
+      '寧夏夜市',
+      '赤峰街',
+      '承德路',
+      '重慶北路',
+      '延平北路',
+      '民權西路',
+      '大橋頭',
+      '雙連',
+      '圓山',
+      '霞海城隍廟',
+    ],
+    city: '台北市',
+    district: '大同區',
+  },
+  {
+    keywords: [
+      '台北車站',
+      '華山1914',
+      '中正紀念堂',
+      '南門市場',
+      '羅斯福路一段',
+      '羅斯福路二段',
+      '忠孝西路',
+      '忠孝東路一段',
+      '忠孝東路二段',
+      '北平東路',
+      '濟南路',
+      '青島東路',
+      '善導寺',
+      '古亭',
+      '公館商圈',
+    ],
+    city: '台北市',
+    district: '中正區',
+  },
+  {
+    keywords: [
+      '西門町',
+      '龍山寺',
+      '剝皮寮',
+      '華西街',
+      '萬華',
+      '成都路',
+      '漢中街',
+      '武昌街',
+      '中華路',
+      '艋舺',
+    ],
+    city: '台北市',
+    district: '萬華區',
+  },
+  {
+    keywords: [
+      '士林夜市',
+      '故宮',
+      '天母',
+      '陽明山',
+      '芝山',
+      '劍潭',
+      '忠誠路',
+      '中山北路五段',
+      '中山北路六段',
+      '中山北路七段',
+      '文林路',
+    ],
+    city: '台北市',
+    district: '士林區',
+  },
+  {
+    keywords: [
+      '北投溫泉',
+      '新北投',
+      '石牌',
+      '明德',
+      '奇岩',
+      '唭哩岸',
+      '關渡',
+      '硫磺谷',
+      '地熱谷',
+    ],
+    city: '台北市',
+    district: '北投區',
+  },
+  {
+    keywords: ['南港展覽館', '南港車站', '昆陽', '後山埤', '研究院路', '市民大道八段'],
+    city: '台北市',
+    district: '南港區',
+  },
+  {
+    keywords: ['貓空', '木柵', '動物園', '景美', '萬隆', '政大', '指南路'],
+    city: '台北市',
+    district: '文山區',
+  },
+  {
+    keywords: ['鳥苑', 'Torien Yakitori', '勤美', '草悟道', '審計新村', '忠明南路', '公益路', '向上路', '美村路'],
+    city: '台中市',
+    district: '西區',
+  },
 ];
 
 // District centroids for coordinate-based district fallback
-const DISTRICT_CENTROIDS: Array<{
+export const DISTRICT_CENTROIDS: Array<{
   city: string;
   district: string;
   lat: number;
@@ -285,10 +519,19 @@ const DISTRICT_CENTROIDS: Array<{
   { city: '台北市', district: '中正區', lat: 25.032, lng: 121.518 },
   { city: '台北市', district: '萬華區', lat: 25.035, lng: 121.499 },
   { city: '台北市', district: '中山區', lat: 25.064, lng: 121.533 },
+  { city: '台北市', district: '松山區', lat: 25.056, lng: 121.558 },
   { city: '台北市', district: '大安區', lat: 25.026, lng: 121.543 },
   { city: '台北市', district: '信義區', lat: 25.033, lng: 121.568 },
+  { city: '台北市', district: '內湖區', lat: 25.083, lng: 121.588 },
+  { city: '台北市', district: '南港區', lat: 25.055, lng: 121.607 },
   { city: '台北市', district: '士林區', lat: 25.092, lng: 121.525 },
   { city: '台北市', district: '北投區', lat: 25.132, lng: 121.501 },
+  { city: '台北市', district: '文山區', lat: 24.993, lng: 121.571 },
+  { city: '新北市', district: '板橋區', lat: 25.011, lng: 121.462 },
+  { city: '新北市', district: '中和區', lat: 24.999, lng: 121.498 },
+  { city: '新北市', district: '永和區', lat: 25.009, lng: 121.515 },
+  { city: '新北市', district: '新店區', lat: 24.968, lng: 121.541 },
+  { city: '新北市', district: '淡水區', lat: 25.175, lng: 121.443 },
   { city: '台中市', district: '中區', lat: 24.142, lng: 120.681 },
   { city: '台中市', district: '西區', lat: 24.145, lng: 120.663 },
   { city: '台中市', district: '西屯區', lat: 24.179, lng: 120.641 },
@@ -473,6 +716,17 @@ export function extractRegionFromAddress(
     }
   }
 
+  // 4.5. Detect Google Maps S2 cell hex prefix in Takeout / share URLs (e.g. !1s0x3442... = Taipei Basin)
+  if (!cityRaw) {
+    if (/0x3442[0-9a-f]{4}/i.test(clean)) {
+      cityRaw = '台北市';
+    } else if (/0x346[89][0-9a-f]{4}/i.test(clean)) {
+      cityRaw = '台中市';
+    } else if (/0x345d[0-9a-f]{4}/i.test(clean)) {
+      cityRaw = '桃園市';
+    }
+  }
+
   // 5. Verify coordinates if available (resolves both city and nearest district!)
   if (coords && !isNaN(coords.lat) && !isNaN(coords.lng)) {
     const { lat, lng } = coords;
@@ -530,13 +784,103 @@ export function extractRegionFromAddress(
     const genericDist = clean.match(
       /(?<!夜|超|門|菜|魚|花|古|早|牛|果)([^\d\s,]{1,3}[區鎮鄉])/
     );
-    district = genericDist ? genericDist[1] : '市中心';
+    const defaultDistrictByCity: Record<string, string> = {
+      台北市: '大安區',
+      新北市: '板橋區',
+      桃園市: '桃園區',
+      台中市: '西區',
+      台南市: '中西區',
+      高雄市: '鹽埕區',
+      嘉義市: '東區',
+      宜蘭縣: '礁溪鄉',
+      花蓮縣: '花蓮市',
+      台東縣: '台東市',
+    };
+    district = genericDist
+      ? genericDist[1]
+      : defaultDistrictByCity[cityRaw] || '市中心';
   }
 
   return {
     country: '台灣',
     city: cityRaw,
     district,
+  };
+}
+
+export function getCoordinatesForRegion(
+  city: string,
+  district: string,
+  seedStr = ''
+): { lat: number; lng: number } {
+  const exact = DISTRICT_CENTROIDS.find(
+    (c) => c.city === city && c.district === district
+  );
+  const byCity = DISTRICT_CENTROIDS.find((c) => c.city === city);
+  const base = exact || byCity || { lat: 25.033, lng: 121.543 };
+
+  let hash = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    hash = (hash * 31 + seedStr.charCodeAt(i)) | 0;
+  }
+  const dLat = ((hash % 100) / 100) * 0.004 - 0.002;
+  const dLng = (((hash >> 4) % 100) / 100) * 0.004 - 0.002;
+
+  return {
+    lat: Number((base.lat + dLat).toFixed(6)),
+    lng: Number((base.lng + dLng).toFixed(6)),
+  };
+}
+
+export function inferPlaceCategoryByName(text: string): {
+  primary_category: string;
+  sub_category: string;
+  estimated_stay_mins: number;
+} {
+  const lower = (text || '').toLowerCase();
+  if (/伴手禮|名產|禮盒|餅店|糕餅|鳳梨酥|肉乾|茶葉/.test(text)) {
+    return {
+      primary_category: 'restaurant',
+      sub_category: 'souvenir',
+      estimated_stay_mins: 20,
+    };
+  }
+  if (
+    /咖啡|甜點|冰|茶|下午茶|布丁|豆花|蛋糕|烘焙|cafe|coffee|bakery|dessert/.test(
+      lower
+    )
+  ) {
+    return {
+      primary_category: 'restaurant',
+      sub_category: 'snack_dessert',
+      estimated_stay_mins: 50,
+    };
+  }
+  if (/博物館|美術館|展覽|文創|藝術|文化|museum|gallery/.test(lower)) {
+    return {
+      primary_category: 'museum_culture',
+      sub_category: 'museum',
+      estimated_stay_mins: 110,
+    };
+  }
+  if (/古蹟|碧山巖|寺|廟|宮|神社|城隍|紀念堂|老街|地標|休閒中心/.test(lower)) {
+    return {
+      primary_category: 'museum_culture',
+      sub_category: 'landmark',
+      estimated_stay_mins: 60,
+    };
+  }
+  if (/步道|公園|山|森林|自然|風景|海岸|吊橋/.test(lower)) {
+    return {
+      primary_category: 'nature_outdoor',
+      sub_category: 'trail',
+      estimated_stay_mins: 90,
+    };
+  }
+  return {
+    primary_category: 'restaurant',
+    sub_category: 'meal',
+    estimated_stay_mins: 80,
   };
 }
 

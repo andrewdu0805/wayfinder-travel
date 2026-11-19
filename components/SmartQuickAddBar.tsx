@@ -12,9 +12,38 @@ import {
   X,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
-import { ALL_AVAILABLE_CITIES, QUICK_ADD_DEMO_PRESETS } from '@/lib/default-data';
-import { extractRegionFromAddress } from '@/lib/geo-utils';
+import { ALL_AVAILABLE_CITIES } from '@/lib/default-data';
+import {
+  extractRegionFromAddress,
+  getCoordinatesForRegion,
+  inferPlaceCategoryByName,
+  separateNameAndAddress,
+} from '@/lib/geo-utils';
 import { SavedPlace, VisitStatus } from '@/types/place';
+
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
 
 interface SmartQuickAddBarProps {
   activeCity: string;
@@ -95,8 +124,11 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
       const text = await file.text();
       const nowIso = new Date().toISOString();
       const imported: SavedPlace[] = [];
+      const fallbackCity =
+        selectedCityOverride ||
+        (activeCity && activeCity !== 'ALL' ? activeCity : '台北市');
 
-      if (file.name.endsWith('.json')) {
+      if (file.name.endsWith('.json') || file.name.endsWith('.geojson')) {
         const json = JSON.parse(text);
         // Case 1: App backup array of SavedPlaces
         if (Array.isArray(json)) {
@@ -115,45 +147,77 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
             const feat = json.features[i];
             const coords = feat.geometry?.coordinates;
             const props = feat.properties || {};
-            const title =
+            const locObj = props.Location || props.location || {};
+            const rawTitle =
               props.Title ||
+              props.title ||
               props.name ||
-              props.Location?.['Business Name'] ||
+              locObj['Business Name'] ||
+              locObj.name ||
               `匯入景點 #${i + 1}`;
-            const address =
-              props.Location?.Address || props.address || '台灣高雄市鹽埕區';
-            const lng = Array.isArray(coords) ? Number(coords[0]) : 120.2835;
-            const lat = Array.isArray(coords) ? Number(coords[1]) : 22.6234;
-            const region = extractRegionFromAddress(address);
+            const sep = separateNameAndAddress(String(rawTitle));
+            const title = sep.cleanName || String(rawTitle);
+            const rawAddress =
+              locObj.Address ||
+              locObj.address ||
+              props.address ||
+              sep.foundAddress ||
+              '';
+            const hasValidCoords =
+              Array.isArray(coords) &&
+              (Number(coords[0]) !== 0 || Number(coords[1]) !== 0);
+            const rawLng = hasValidCoords ? Number(coords[0]) : NaN;
+            const rawLat = hasValidCoords ? Number(coords[1]) : NaN;
+            const gmapsUrl =
+              props['Google Maps URL'] || props.google_maps_url || '';
+
+            const region = extractRegionFromAddress(
+              `${rawAddress} ${title} ${rawTitle} ${gmapsUrl}`,
+              !isNaN(rawLat) && !isNaN(rawLng)
+                ? { lat: rawLat, lng: rawLng }
+                : null,
+              fallbackCity
+            );
+            const fallbackCoords = getCoordinatesForRegion(
+              region.city,
+              region.district,
+              title
+            );
+            const lat = !isNaN(rawLat) ? rawLat : fallbackCoords.lat;
+            const lng = !isNaN(rawLng) ? rawLng : fallbackCoords.lng;
+            const cat = inferPlaceCategoryByName(
+              `${title} ${props.Comment || props.Note || ''}`
+            );
 
             imported.push({
               id: `takeout-${Date.now()}-${i}`,
-              google_place_id:
-                props.google_maps_url || `takeout_${title}_${i}`,
+              google_place_id: gmapsUrl || `takeout_${title}_${i}`,
               name: title,
-              formatted_address: address,
+              formatted_address:
+                rawAddress || `${region.country}${region.city}${region.district}`,
               country: region.country,
               city: region.city,
               district: region.district,
-              latitude: lat || 22.6234,
-              longitude: lng || 120.2835,
-              primary_category: 'restaurant',
-              sub_category: 'meal',
+              latitude: lat,
+              longitude: lng,
+              primary_category: cat.primary_category,
+              sub_category: cat.sub_category,
               visit_status: 'unvisited',
               business_status: 'OPERATIONAL',
-              estimated_stay_mins: 60,
-              rating: 4.4,
+              estimated_stay_mins: cat.estimated_stay_mins,
+              rating: 4.5,
               opening_hours_json: {
                 open_now: true,
                 weekday_descriptions: ['每日 10:00–21:00'],
                 daily_hours: { open: '10:00', close: '21:00' },
               },
               google_maps_url:
-                props['Google Maps URL'] ||
+                gmapsUrl ||
                 `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                  title
+                  `${title} ${region.city}`
                 )}`,
-              user_notes: props.Comment || props.Note || '由 Google Takeout 匯入',
+              user_notes:
+                props.Comment || props.Note || props.note || '由 Google Takeout 匯入',
               custom_tags: ['#Takeout匯入'],
               last_visited_at: null,
               hours_updated_at: nowIso,
@@ -167,28 +231,55 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
           .split(/\r?\n/)
           .map((l) => l.trim())
           .filter(Boolean);
-        // Skip header row
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(',').map((c) => c.replace(/^"|"$/g, ''));
-          const title = cols[0] || `CSV景點 #${i}`;
+        for (let i = 0; i < lines.length; i++) {
+          const cols = parseCsvLine(lines[i]);
+          const firstCol = (cols[0] || '').trim();
+          // Skip header row or blank rows
+          if (
+            !firstCol ||
+            /^(標題|店名|名稱|Title|Name)$/i.test(firstCol)
+          ) {
+            continue;
+          }
+          const sep = separateNameAndAddress(firstCol);
+          const title = sep.cleanName || firstCol;
           const note = cols[1] || '';
           const url = cols[2] || '';
+          let decodedUrl = url;
+          try {
+            decodedUrl = decodeURIComponent(url);
+          } catch {}
+
+          const region = extractRegionFromAddress(
+            `${sep.foundAddress || ''} ${title} ${firstCol} ${note} ${decodedUrl}`,
+            null,
+            fallbackCity
+          );
+          const coords = getCoordinatesForRegion(
+            region.city,
+            region.district,
+            title
+          );
+          const cat = inferPlaceCategoryByName(`${title} ${note}`);
+
           imported.push({
             id: `csv-${Date.now()}-${i}`,
             google_place_id: `csv_${title}`,
             name: title,
-            formatted_address: '台灣高雄市鹽埕區',
-            country: '台灣',
-            city: '高雄市',
-            district: '鹽埕區',
-            latitude: 22.6234 + (i % 5) * 0.0015,
-            longitude: 120.2835 + (i % 5) * 0.0015,
-            primary_category: 'restaurant',
-            sub_category: 'meal',
+            formatted_address:
+              sep.foundAddress ||
+              `${region.country}${region.city}${region.district}`,
+            country: region.country,
+            city: region.city,
+            district: region.district,
+            latitude: coords.lat,
+            longitude: coords.lng,
+            primary_category: cat.primary_category,
+            sub_category: cat.sub_category,
             visit_status: 'unvisited',
             business_status: 'OPERATIONAL',
-            estimated_stay_mins: 60,
-            rating: 4.4,
+            estimated_stay_mins: cat.estimated_stay_mins,
+            rating: 4.5,
             opening_hours_json: {
               open_now: true,
               weekday_descriptions: ['每日 10:00–21:00'],
@@ -197,7 +288,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
             google_maps_url:
               url ||
               `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                title
+                `${title} ${region.city}`
               )}`,
             user_notes: note || '由 CSV 清單匯入',
             custom_tags: ['#CSV匯入'],

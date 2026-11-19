@@ -21,6 +21,8 @@ import {
 } from '@/lib/default-data';
 import {
   extractRegionFromAddress,
+  getCoordinatesForRegion,
+  inferPlaceCategoryByName,
   separateNameAndAddress,
 } from '@/lib/geo-utils';
 
@@ -77,6 +79,60 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   let nextAddr = p.formatted_address || '';
   let nextCity = p.city;
   let nextDist = p.district;
+  let nextLat = p.latitude;
+  let nextLng = p.longitude;
+  let nextPrimary = p.primary_category;
+  let nextSub = p.sub_category;
+  let nextStay = p.estimated_stay_mins;
+
+  // Detect records poisoned by the old hardcoded '台灣高雄市鹽埕區' CSV/Takeout placeholder
+  const isImportedRecord =
+    p.id?.startsWith('csv-') ||
+    p.id?.startsWith('takeout-') ||
+    p.google_place_id?.startsWith('csv_') ||
+    p.google_place_id?.startsWith('takeout_') ||
+    p.custom_tags?.includes('#CSV匯入') ||
+    p.custom_tags?.includes('#Takeout匯入');
+
+  const isPoisonedKaohsiungPlaceholder =
+    isImportedRecord &&
+    (nextAddr === '台灣高雄市鹽埕區' ||
+      (nextCity === '高雄市' &&
+        nextDist === '鹽埕區' &&
+        !/高雄|鹽埕|駁二|大溝頂|鴨肉珍|港園|銀座聚場/.test(
+          `${p.name} ${p.user_notes || ''}`
+        )));
+
+  if (isPoisonedKaohsiungPlaceholder) {
+    // Strip the fake Kaohsiung placeholder address and fake 22.6234, 120.2835 coordinates
+    let decodedUrlText = '';
+    try {
+      decodedUrlText = decodeURIComponent(p.google_maps_url || '');
+    } catch {
+      decodedUrlText = p.google_maps_url || '';
+    }
+    const cleanReg = extractRegionFromAddress(
+      `${sep.foundAddress || ''} ${nextName} ${p.name} ${p.user_notes || ''} ${decodedUrlText}`,
+      null,
+      '台北市'
+    );
+    nextCity = cleanReg.city;
+    nextDist = cleanReg.district;
+    nextAddr = sep.foundAddress || `${cleanReg.country}${cleanReg.city}${cleanReg.district}`;
+    const newCoords = getCoordinatesForRegion(nextCity, nextDist, nextName);
+    nextLat = newCoords.lat;
+    nextLng = newCoords.lng;
+
+    // Also fix category if it was blindly defaulted to restaurant/meal
+    const inferredCat = inferPlaceCategoryByName(
+      `${nextName} ${p.user_notes || ''}`
+    );
+    if (nextPrimary === 'restaurant' && nextSub === 'meal') {
+      nextPrimary = inferredCat.primary_category;
+      nextSub = inferredCat.sub_category;
+      nextStay = inferredCat.estimated_stay_mins;
+    }
+  }
 
   if (sep.foundAddress && sep.cleanName && sep.cleanName !== p.name) {
     nextName = sep.cleanName;
@@ -92,11 +148,11 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     }
   }
 
-  // Detect true region from full text + coordinates
+  // Detect true region from full text + coordinates (skip fake coords if imported placeholder)
   const reg = extractRegionFromAddress(
-    `${sep.foundAddress || ''} ${nextAddr} ${p.formatted_address || ''} ${nextName} ${p.name}`,
-    { lat: p.latitude, lng: p.longitude },
-    nextCity
+    `${sep.foundAddress || ''} ${nextAddr} ${nextName} ${p.name}`,
+    isPoisonedKaohsiungPlaceholder ? null : { lat: nextLat, lng: nextLng },
+    nextCity || '台北市'
   );
 
   if (reg.city && reg.district) {
@@ -115,6 +171,11 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     formatted_address: nextAddr || p.formatted_address,
     city: nextCity,
     district: nextDist,
+    latitude: nextLat,
+    longitude: nextLng,
+    primary_category: nextPrimary,
+    sub_category: nextSub,
+    estimated_stay_mins: nextStay,
   };
 }
 
@@ -128,6 +189,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncMessage, setLastSyncMessage] = useState<string | null>(null);
+  const enrichedIdsRef = React.useRef<Set<string>>(new Set());
 
   // Hydrate from localStorage on client mount
   useEffect(() => {
@@ -136,7 +198,9 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       if (rawPlaces !== null) {
         const parsed = JSON.parse(rawPlaces);
         if (Array.isArray(parsed)) {
-          setPlaces(parsed.map(sanitizePlaceRecord));
+          const sanitized = parsed.map(sanitizePlaceRecord);
+          setPlaces(sanitized);
+          // Also sync repaired records back to recentUpserts if any
         }
       }
       const rawCats = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
@@ -223,6 +287,96 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       setIsHydrated(true);
     }
   }, []);
+
+  // Automatically enrich CSV/Takeout imported places in the background via /api/smart-parse
+  // so they get exact official addresses, cities, districts, and coordinates
+  useEffect(() => {
+    if (!isHydrated) return;
+    const unenriched = places.filter((p) => {
+      if (enrichedIdsRef.current.has(p.id)) return false;
+      const isCsvOrTakeout =
+        p.id?.startsWith('csv-') ||
+        p.id?.startsWith('takeout-') ||
+        p.google_place_id?.startsWith('csv_') ||
+        p.google_place_id?.startsWith('takeout_');
+      if (!isCsvOrTakeout) return false;
+      // Needs enrichment if formatted_address has no street/number (號/路/街)
+      return !/[路街段巷弄號]/.test(p.formatted_address || '');
+    });
+
+    if (unenriched.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      for (const item of unenriched) {
+        if (cancelled) break;
+        enrichedIdsRef.current.add(item.id);
+        try {
+          const queryInput =
+            item.google_maps_url &&
+            !item.google_maps_url.includes('maps/search/?api=1&query=')
+              ? `${item.name} ${item.google_maps_url}`
+              : item.name;
+          const res = await fetch('/api/smart-parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              input: queryInput,
+              defaultCity: item.city || '台北市',
+              skipGemini: true,
+              categoryConfigs,
+              geminiApiKey: settings.geminiApiKey,
+              googleMapsApiKey: settings.googleMapsApiKey,
+            }),
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          const enriched: SavedPlace | undefined = data.places?.[0];
+          if (enriched && !cancelled) {
+            const applyEnriched = (p: SavedPlace): SavedPlace => ({
+              ...p,
+              google_place_id: enriched.google_place_id || p.google_place_id,
+              formatted_address:
+                enriched.formatted_address || p.formatted_address,
+              country: enriched.country || p.country,
+              city: enriched.city || p.city,
+              district: enriched.district || p.district,
+              latitude: enriched.latitude || p.latitude,
+              longitude: enriched.longitude || p.longitude,
+              primary_category:
+                enriched.primary_category || p.primary_category,
+              sub_category: enriched.sub_category || p.sub_category,
+              rating: enriched.rating ?? p.rating,
+              opening_hours_json:
+                enriched.opening_hours_json || p.opening_hours_json,
+            });
+            setPlaces((prev) =>
+              prev.map((p) => (p.id === item.id ? applyEnriched(p) : p))
+            );
+            setRecentUpserts((prev) =>
+              prev.map((rec) =>
+                rec.place.id === item.id
+                  ? { ...rec, place: applyEnriched(rec.place) }
+                  : rec
+              )
+            );
+          }
+        } catch {
+          // ignore individual lookup errors
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isHydrated,
+    places,
+    categoryConfigs,
+    settings.geminiApiKey,
+    settings.googleMapsApiKey,
+  ]);
 
   // Persist places to localStorage
   useEffect(() => {

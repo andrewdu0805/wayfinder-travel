@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
   extractRegionFromAddress,
+  getCoordinatesForRegion,
   separateNameAndAddress,
 } from '@/lib/geo-utils';
 import { CategoryConfig, SavedPlace, VisitStatus } from '@/types/place';
@@ -247,7 +248,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const rawInput: string = (body.input || '').trim();
-    const defaultCity: string = body.defaultCity || '高雄市';
+    const defaultCity: string = body.defaultCity || '台北市';
+    const skipGemini: boolean = Boolean(body.skipGemini);
     const categoryConfigs: CategoryConfig[] =
       body.categoryConfigs || DEFAULT_CATEGORY_CONFIGS;
 
@@ -451,7 +453,7 @@ export async function POST(req: NextRequest) {
       custom_tags: string[];
     }> = [];
 
-    if (geminiApiKey && geminiApiKey !== 'your-gemini-api-key') {
+    if (!skipGemini && geminiApiKey && geminiApiKey !== 'your-gemini-api-key') {
       try {
         const ai = new GoogleGenAI({ apiKey: geminiApiKey });
         const validSubCategories = categoryConfigs.map((c) => c.sub_category);
@@ -656,15 +658,8 @@ ${resolvedInput}`,
       const region = extractRegionFromAddress(
         fullLocationString,
         urlDetectedCoords,
-        defaultCity || '台南市'
+        defaultCity || '台北市'
       );
-
-      const detectedCityKey = region.city;
-      const baseCenter =
-        cityCenterMap[detectedCityKey] ||
-        (defaultCity in cityCenterMap
-          ? cityCenterMap[defaultCity]
-          : cityCenterMap['台南市']);
 
       let placeId = `custom_${cand.name.replace(/\s+/g, '_').toLowerCase()}`;
       let formattedAddress =
@@ -673,12 +668,13 @@ ${resolvedInput}`,
           ? cand.addressHint
           : `${region.country}${region.city}${region.district}${cand.name}`);
 
-      let lat =
-        urlDetectedCoords?.lat ??
-        baseCenter.lat + Math.sin(i * 1.9 + cand.name.length) * 0.0045;
-      let lng =
-        urlDetectedCoords?.lng ??
-        baseCenter.lng + Math.cos(i * 1.9 + cand.name.length) * 0.0045;
+      const fallbackCoords = getCoordinatesForRegion(
+        region.city,
+        region.district,
+        `${cand.name}-${i}`
+      );
+      let lat = urlDetectedCoords?.lat ?? fallbackCoords.lat;
+      let lng = urlDetectedCoords?.lng ?? fallbackCoords.lng;
       let rating: number | null = 4.5;
       let weekdayDescriptions = ['每日 10:00–21:00'];
       let dailyHours = { open: '10:00', close: '21:00' };
