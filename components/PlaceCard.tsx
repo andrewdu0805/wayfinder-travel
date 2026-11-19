@@ -7,10 +7,12 @@ import {
   MapPin,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
 import { getCoordinatesForRegion } from '@/lib/geo-utils';
+import { resolvePlaceDescription } from '@/lib/place-notes';
 import { BusinessStatus, SavedPlace, VisitStatus } from '@/types/place';
 
 const CITY_DISTRICTS_MAP: Record<string, string[]> = {
@@ -110,6 +112,39 @@ export function PlaceCard({ place }: PlaceCardProps) {
 
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState(place.user_notes || '');
+  const [isEnrichingNote, setIsEnrichingNote] = useState(false);
+
+  const handleFetchGoogleMapsSummary = async () => {
+    setIsEnrichingNote(true);
+    try {
+      const res = await fetch('/api/enrich-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: place.name,
+          city: place.city,
+          district: place.district,
+          address: place.formatted_address,
+          googleMapsUrl: place.google_maps_url,
+        }),
+      });
+      const data = await res.json();
+      if (data.description) {
+        setNoteDraft(data.description);
+      }
+    } catch {
+      const freshDesc = resolvePlaceDescription(
+        place.name,
+        place.city,
+        place.district,
+        place.sub_category,
+        place.formatted_address
+      );
+      setNoteDraft(freshDesc);
+    } finally {
+      setIsEnrichingNote(false);
+    }
+  };
 
   const matchedConfig = categoryConfigs.find(
     (c) => c.sub_category === place.sub_category
@@ -152,10 +187,18 @@ export function PlaceCard({ place }: PlaceCardProps) {
                     nextDist,
                     place.name
                   );
+                  const freshNotes = resolvePlaceDescription(
+                    place.name,
+                    place.city,
+                    nextDist,
+                    place.sub_category,
+                    place.formatted_address
+                  );
                   updatePlaceInline(place.id, {
                     district: nextDist,
                     latitude: newCoords.lat,
                     longitude: newCoords.lng,
+                    user_notes: freshNotes,
                   });
                 }}
                 className="appearance-none rounded-xl border border-stone-200 bg-stone-100 pl-6.5 pr-6 py-1 text-xs sm:text-sm font-extrabold text-stone-800 hover:bg-stone-200 hover:border-stone-300 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer transition-colors truncate"
@@ -338,15 +381,27 @@ export function PlaceCard({ place }: PlaceCardProps) {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-base font-extrabold text-stone-800">
-                店家必點推薦或心得備註：
-              </label>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="block text-base font-extrabold text-stone-800">
+                  店家必點推薦或心得備註：
+                </label>
+                <button
+                  type="button"
+                  disabled={isEnrichingNote}
+                  onClick={handleFetchGoogleMapsSummary}
+                  className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50 transition-colors cursor-pointer"
+                  title="依所在行政區重新套用 Google Maps 評論摘要"
+                >
+                  <Sparkles className={`h-3 w-3 text-amber-600 ${isEnrichingNote ? 'animate-spin' : ''}`} />
+                  {isEnrichingNote ? '擷取摘要中...' : `重新套用 ${place.district} Google Maps 評論摘要`}
+                </button>
+              </div>
               <textarea
                 rows={5}
                 value={noteDraft}
                 onChange={(e) => setNoteDraft(e.target.value)}
                 className="w-full rounded-xl border-2 border-stone-300 p-3.5 text-base font-medium text-stone-900 focus:border-amber-600 focus:outline-none"
-                placeholder="例如：必點古法燻羊肉、蒜油麵線，假日人多需先預約..."
+                placeholder="例如：牛肉新鮮軟嫩，點牛肉湯可無限續湯並免費享用美味牛肉燥飯..."
                 autoFocus
               />
             </div>

@@ -228,12 +228,21 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
 
   // 5. Google Maps-style Note & Description Auto-Resolution:
   // If notes are empty or generic import placeholders like "由 CSV 清單匯入", automatically resolve a rich Google Maps description!
+  // ALSO: Self-heal cross-district notes mismatch (e.g. 新化區 store previously erroneously assigned 國華街 note)
   let nextNotes = p.user_notes || '';
+  const hasCrossDistrictConflict =
+    (nextDist !== '中西區' && nextNotes.includes('國華街')) ||
+    (nextDist !== '中西區' && nextNotes.includes('保安路')) ||
+    (nextDist !== '南區' && nextNotes.includes('夏林路')) ||
+    (nextDist !== '北區' && nextNotes.includes('崇安街')) ||
+    (nextDist !== '安平區' && nextNotes.includes('安平'));
+
   if (
     !nextNotes ||
     nextNotes === '由 CSV 清單匯入' ||
     nextNotes === '由 Google Takeout 匯入' ||
-    nextNotes === '透過智慧快速輸入新增'
+    nextNotes === '透過智慧快速輸入新增' ||
+    hasCrossDistrictConflict
   ) {
     nextNotes = resolvePlaceDescription(
       nextName,
