@@ -126,7 +126,7 @@ export function resolvePlaceFromGoogleMapsUrl(
   }
 
   // 5. Category Inference
-  const cat = inferPlaceCategoryByName(`${cleanName} ${userNote}`);
+  const cat = inferPlaceCategoryByName(cleanName);
   const matchedCfg = categoryConfigs.find(
     (c) => c.sub_category === cat.sub_category
   );

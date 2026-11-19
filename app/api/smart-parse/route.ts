@@ -200,9 +200,10 @@ function inferCategoryHeuristic(
   const findStay = (sub: string, fallback: number) =>
     configs.find((c) => c.sub_category === sub)?.default_stay_mins ?? fallback;
 
+  // 1. Souvenir
   if (
-    /伴手禮|名產|禮盒|蛋糕店|餅店|糕餅|銅鑼燒|肉紙|鳳梨酥|蜜餞|不二緻果|巴堂|舊振南/.test(
-      text
+    /伴手禮|名產|禮盒|蛋糕店|餅店|糕餅|銅鑼燒|肉紙|鳳梨酥|蜜餞|不二緻果|巴堂|舊振南|太陽餅|奶油酥餅|牛軋糖/.test(
+      lower
     )
   ) {
     return {
@@ -212,20 +213,48 @@ function inferCategoryHeuristic(
       visit_status,
     };
   }
+
+  // 2. Bar / Craft Beer / Bistro / Nightlife
   if (
-    /咖啡|甜點|冰|奶茶|下午茶|布丁|豆花|水煎包|車輪餅|雞蛋糕|和菓子|泡芙|鬆餅|烘焙|cafe|coffee|bakery|dessert/.test(
+    /餐酒|酒吧|bistro|\bbar\b|居酒屋|啤酒|精釀|小酌|調酒|\bpub\b|\bwine\b|\bbeer\b|酉|微醺|釀造|酒造|品酒|bottle|瓶子|選酒|自然酒|紅白酒|葡萄酒|洋酒|烈酒|清酒|威士忌|whisky|whiskey|cocktail|gin|sake|taproom|draft|酒館|酒莊/.test(
       lower
     )
   ) {
     return {
       primary_category: 'restaurant',
-      sub_category: 'snack_dessert',
-      estimated_stay_mins: findStay('snack_dessert', 45),
+      sub_category: 'bar',
+      estimated_stay_mins: findStay('bar', 90),
       visit_status,
     };
   }
+
+  // 3. Desserts, Coffee, Bakery (excluding 茶餐廳)
+  if (!lower.includes('茶餐廳')) {
+    if (
+      /咖啡|甜點|下午茶|布丁|豆花|蛋糕|烘焙|泡芙|鬆餅|奶茶|和菓子|刨冰|剉冰|雪花冰|冰淇淋|冰店|甘味|cafe|coffee|bakery|dessert|ice cream/.test(
+        lower
+      )
+    ) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'snack_dessert',
+        estimated_stay_mins: findStay('snack_dessert', 45),
+        visit_status,
+      };
+    }
+    if (/(?:紅茶|綠茶|烏龍茶|手搖|水果茶|抹茶|冰品|吃冰)/.test(lower)) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'snack_dessert',
+        estimated_stay_mins: findStay('snack_dessert', 40),
+        visit_status,
+      };
+    }
+  }
+
+  // 4. Museums & Cultural Centers
   if (
-    /藝文中心|文化中心|藝術中心|文化園區|文創園區|博物館|美術館|展覽館|展覽|特區|藝術館|歷史館|鐵道館|糖廠|工坊|藝文|展演|故事館|紀念館|museum|gallery|art center/.test(
+    /藝文中心|文化中心|藝術中心|文化園區|文創園區|文創園|文創特區|藝術特區|美術館|博物館|展覽館|展覽|藝術館|歷史館|鐵道館|糖廠|展演|故事館|紀念館|故宮|天文館|科博館|科學館|海洋館|水族館|museum|gallery|art center/.test(
       lower
     )
   ) {
@@ -236,8 +265,10 @@ function inferCategoryHeuristic(
       visit_status,
     };
   }
+
+  // 5. Landmarks, Temples, Heritage (Safe without bare 堡 or 宮)
   if (
-    /古蹟|神社|寺|廟|宮|城隍|雷門|地標|景觀台|老街|砲台|燈塔|城門|堡/.test(
+    /古蹟|歷史建築|紀念堂|宗祠|古厝|砲台|燈塔|城門|牌坊|神社|天后宮|城隍廟|關帝廟|文武廟|三清宮|佛寺|寺院|天主堂|大教堂|老街|地標|安平古堡|億載金城|紅毛城|赤崁樓|孔廟/.test(
       lower
     )
   ) {
@@ -248,7 +279,9 @@ function inferCategoryHeuristic(
       visit_status,
     };
   }
-  if (/樂園|遊樂場|卡丁車|摩天輪|樂園/.test(lower)) {
+
+  // 6. Amusement & Theme Parks
+  if (/樂園|遊樂場|摩天輪|卡丁車|水上樂園|主題樂園|主題公園/.test(lower)) {
     return {
       primary_category: 'theme_park_leisure',
       sub_category: 'amusement_park',
@@ -256,7 +289,13 @@ function inferCategoryHeuristic(
       visit_status,
     };
   }
-  if (/步道|公園|森林|海岸|看海|風景|山/.test(lower)) {
+
+  // 7. Nature Trails (Safe without bare 山 or 自然)
+  if (
+    /登山步道|登山|步道|健行|步徑|林道|古道|森林公園|國家公園|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|海水浴場|海岸風景|觀景台|瞭望台|神木|露營區/.test(
+      lower
+    )
+  ) {
     return {
       primary_category: 'nature_outdoor',
       sub_category: 'trail',
@@ -264,7 +303,9 @@ function inferCategoryHeuristic(
       visit_status,
     };
   }
-  if (/市集|百貨|商圈|選物|購物/.test(lower)) {
+
+  // 8. Shopping & Market
+  if (/市集|百貨|商圈|選物店|購物中心|outlet/.test(lower)) {
     return {
       primary_category: 'shopping',
       sub_category: 'other',
@@ -272,6 +313,8 @@ function inferCategoryHeuristic(
       visit_status,
     };
   }
+
+  // 9. Dining / Meals
   return {
     primary_category: 'restaurant',
     sub_category: 'meal',

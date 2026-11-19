@@ -137,7 +137,7 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   // otherwise the old placeholder city/district will override coordinate/name detection!
   const addressTextForDetection = [
     sep.foundAddress || '',
-    isPlaceholderAddr ? '' : nextAddr,
+    isPlaceholderAddr ? (nextCity ? `${nextCity} ${nextDist}` : '') : nextAddr,
     nextName,
     p.name,
     p.user_notes || '',
@@ -152,12 +152,15 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   }
 
   const coordsForDetection =
-    urlCoords || (!isPlaceholderAddr ? { lat: nextLat, lng: nextLng } : null);
+    urlCoords ||
+    (nextLat && nextLng && nextLat > 20 && nextLat < 27
+      ? { lat: nextLat, lng: nextLng }
+      : null);
 
   const reg = extractRegionFromAddress(
     addressTextForDetection,
     coordsForDetection,
-    isPlaceholderAddr ? '台南市' : nextCity || '台南市'
+    nextCity || '台南市'
   );
 
   if (reg.city && reg.district) {
@@ -173,9 +176,7 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
       nextLat = newCoords.lat;
       nextLng = newCoords.lng;
     }
-    const inferredCat = inferPlaceCategoryByName(
-      `${nextName} ${p.user_notes || ''}`
-    );
+    const inferredCat = inferPlaceCategoryByName(nextName);
     if (nextPrimary === 'restaurant' && nextSub === 'meal') {
       nextPrimary = inferredCat.primary_category;
       nextSub = inferredCat.sub_category;
@@ -274,12 +275,24 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     }
   }
 
-  // 4.5. Auto-correct places erroneously classified as "restaurant / meal" when their name clearly indicates culture, landmark, park, etc.
-  // Note: If user has explicitly changed the category to something else, this is skipped!
+  // 4.5. Auto-correct erroneously classified categories:
+  // A. If an eatery/food place was mistakenly classified as 'trail' (e.g. Mon Poulet in 鼓山區 matched old loose /山/ regex):
+  if (nextSub === 'trail' || nextPrimary === 'nature_outdoor') {
+    const isRealTrail =
+      /登山步道|登山|步道|健行|步徑|林道|古道|森林公園|國家公園|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|海水浴場|海岸風景|觀景台|瞭望台|神木|露營區/.test(
+        nextName
+      );
+    if (!isRealTrail) {
+      const properCat = inferPlaceCategoryByName(nextName);
+      nextPrimary = properCat.primary_category;
+      nextSub = properCat.sub_category;
+      nextStay = properCat.estimated_stay_mins;
+    }
+  }
+
+  // B. If a culture/landmark/bar place was defaulted to 'restaurant / meal':
   if (nextPrimary === 'restaurant' && nextSub === 'meal') {
-    const inferredCat = inferPlaceCategoryByName(
-      `${nextName} ${p.user_notes || ''}`
-    );
+    const inferredCat = inferPlaceCategoryByName(nextName);
     if (inferredCat.sub_category !== 'meal') {
       nextPrimary = inferredCat.primary_category;
       nextSub = inferredCat.sub_category;
@@ -288,7 +301,8 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   }
 
   // 5. Google Maps-style Note & Description Auto-Resolution:
-  // If notes are empty or generic import placeholders like "由 CSV 清單匯入", automatically resolve a rich Google Maps description!
+  // If notes are empty, generic import placeholders like "由 CSV 清單匯入", or the old boilerplate sentence,
+  // automatically resolve a rich authentic Google Maps description!
   // ALSO: Self-heal cross-district notes mismatch (e.g. 新化區 store previously erroneously assigned 國華街 note)
   if (!nextNotes) nextNotes = p.user_notes || '';
   const hasCrossDistrictConflict =
@@ -298,13 +312,14 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     (nextDist !== '北區' && nextNotes.includes('崇安街')) ||
     (nextDist !== '安平區' && nextNotes.includes('安平'));
 
-  if (
-    !nextNotes ||
-    nextNotes === '由 CSV 清單匯入' ||
-    nextNotes === '由 Google Takeout 匯入' ||
-    nextNotes === '透過智慧快速輸入新增' ||
-    hasCrossDistrictConflict
-  ) {
+  const isOldBoilerplate =
+    nextNotes.includes('Google Maps 在地高評價推薦熱點') ||
+    nextNotes.includes('深獲旅人與老饕喜愛') ||
+    nextNotes.includes('由 CSV 清單匯入') ||
+    nextNotes.includes('由 Google Takeout 匯入') ||
+    nextNotes.includes('透過智慧快速輸入新增');
+
+  if (!nextNotes || isOldBoilerplate || hasCrossDistrictConflict) {
     nextNotes = resolvePlaceDescription(
       nextName,
       nextCity,

@@ -445,7 +445,49 @@ export const KNOWN_PLACE_GOOGLE_MAPS_DESCRIPTIONS: KnownPlaceDesc[] = [
     description: '旗津知名現炸地瓜酥伴手禮，薄脆裹蜜糖酥脆不黏牙',
   },
 
-  // 新興區 / 前金區 / 苓雅區 / 前鎮區
+  // 新興區 / 前金區 / 苓雅區 / 鼓山區 / 鹽埕區
+  {
+    keywords: ['Mon Poulet', 'mon poulet', 'MonPoulet'],
+    city: '高雄市',
+    description:
+      '法國老闆主理道地法式烤雞專賣，以法國旋轉烤箱慢火烘烤台灣黑羽土雞，外皮金黃酥脆肉質鮮嫩多汁，必點普羅旺斯燉菜與奶油烤馬鈴薯',
+  },
+  {
+    keywords: ['九重葛無名麵店', '好吃的麻醬麵', '九重葛麵店', '九重葛'],
+    city: '高雄市',
+    description:
+      '中華四路盛開九重葛無名排隊麵店，招牌寬麵濃郁麻醬香氣撲鼻，搭配厚切豐富滷味切盤與現煮水餃，在地人氣排隊古早味',
+  },
+  {
+    keywords: ['TACB 人文餐酒', 'TACB', 'tacb'],
+    city: '高雄市',
+    description:
+      '新興區新崛江人氣質感人文餐酒館，以原創故事概念特調雞尾酒與精緻創意下酒菜聞名，氛圍優雅舒適，微醺聚會首選',
+  },
+  {
+    keywords: ['啤酒瘋', 'Beer Bee'],
+    city: '高雄市',
+    description:
+      '高雄老字號世界精釀啤酒專賣店，提供數百款各國特色精釀與現壓生啤酒，專業選酒推薦，啤酒老饕微醺聚會聖地',
+  },
+  {
+    keywords: ['小酌 FEWdrink', 'FEWdrink', '小酌'],
+    city: '高雄市',
+    description:
+      '隱身巷弄極具設計質感的微醺酒吧，調酒層次豐富細膩，提供放鬆溫暖的沉浸空間與特色精緻餐點',
+  },
+  {
+    keywords: ['掌門精釀餐酒館', '掌門精釀'],
+    city: '高雄市',
+    description:
+      '駁二棧貳庫海景第一排精釀啤酒餐酒館，坐擁無敵夕陽港灣海景與數十款新鮮現壓在地精釀啤酒，浪漫聚會極致饗宴',
+  },
+  {
+    keywords: ['Wild Bottle', '野瓶子', 'Wild Bottle 野瓶子'],
+    city: '高雄市',
+    description:
+      '鹽埕大溝頂質感自然酒與葡萄酒專門店，精選世界獨立酒莊自然派葡萄酒，氛圍純粹迷人，品酒愛好者秘密基地',
+  },
   {
     keywords: ['不二緻果', '高雄不二家'],
     city: '高雄市',
@@ -562,14 +604,59 @@ export function resolvePlaceDescription(
   // 3. Dynamic synthesis based on food / place keywords in the name
   const lower = clean.toLowerCase();
 
-  // 餐酒 / 酒吧
-  if (/餐酒|酒吧|bistro|bar|居酒屋|串燒|啤酒|調酒|酉/.test(lower)) {
-    return `${city}${district ? '・' + district : ''}人氣餐酒酒吧，以特色調酒與創意下酒料理聞名，適合微醺小酌與朋友聚餐`;
+  // 烤雞 / 炸雞 / 燒臘 / 烤鴨 (e.g. Mon Poulet, 烤雞, 燒臘)
+  if (
+    /poulet|烤雞|炸雞|鹹酥雞|香雞排|鹽酥雞|甕仔雞|桶仔雞|鹽水雞|油雞|燒臘|烤鴨|鵝肉|春雞|香草雞|chicken/.test(
+      lower
+    )
+  ) {
+    return `${city}${district ? '・' + district : ''}人氣招牌烤雞與經典禽肉名店，外皮金黃酥脆香氣誘人，肉質鮮嫩多汁，老饕一致推薦`;
   }
 
-  // 咖啡 / 甜點 / 冰品
+  // 麻醬麵 / 無名麵店 / 陽春麵 / 傳統麵攤 (e.g. 九重葛無名麵店)
+  if (/麻醬|九重葛|無名麵|陽春麵|乾麵|乾拌麵/.test(lower)) {
+    return `${city}${district ? '・' + district : ''}在地排隊經典傳統麵攤，招牌麻醬香氣濃郁醇厚，裹滿彈牙麵條，搭配豐富現切滷味是絕配`;
+  }
+
+  // 餐酒 / 酒吧 / 精釀啤酒 / 調酒 / 自然酒
   if (
-    /咖啡|cafe|coffee|甜點|布丁|蛋糕|bakery|烘焙|冰|豆花|泡芙|下午茶|茶飲|奶茶|甘味/.test(
+    /餐酒|酒吧|bistro|\bbar\b|居酒屋|串燒|啤酒|精釀|小酌|調酒|\bpub\b|\bwine\b|\bbeer\b|酉|微醺|釀造|酒造|品酒|bottle|瓶子|選酒|自然酒|紅白酒|葡萄酒|洋酒|烈酒|清酒|威士忌|whisky|whiskey|cocktail|gin|sake|taproom|draft|酒館|酒莊/.test(
+      lower
+    )
+  ) {
+    return `${city}${district ? '・' + district : ''}在地人氣餐酒酒吧，以特色原創調酒與精緻下酒料理聞名，氛圍迷人，適合微醺小酌與朋友聚會`;
+  }
+
+  // 異國料理 / 西餐 / 牛排 / 披薩 / 漢堡 / 義大利麵 / 燉飯
+  if (
+    /steak|pasta|pizza|burger|牛排|披薩|比薩|義大利麵|漢堡|排餐|燉飯|西餐|法式|義式|美式|墨西哥|餐館|kitchen|diner|trattoria|pizzeria/.test(
+      lower
+    )
+  ) {
+    return `${city}${district ? '・' + district : ''}超人氣異國風味料理餐館，主廚精選新鮮食材烹調，口味道地精緻，朋友聚餐約會首選`;
+  }
+
+  // 日式料理 / 壽司 / 生魚片 / 丼飯 / 定食 / 炸豬排 / 鰻魚 / 燒肉
+  if (
+    /sushi|ramen|壽司|生魚片|刺身|丼|定食|日式|炸豬排|鰻魚|天婦羅|和食|燒肉|烤肉/.test(
+      lower
+    )
+  ) {
+    return `${city}${district ? '・' + district : ''}在地口碑日式料理名店，生鮮漁獲新鮮甘美，刀工精湛用料講究，品味經典和風美饌`;
+  }
+
+  // 火鍋 / 麻辣鍋 / 涮涮鍋 / 羊肉爐 / 薑母鴨 / 鍋物
+  if (
+    /火鍋|麻辣鍋|涮涮鍋|鍋物|羊肉爐|薑母鴨|石頭火鍋|酸菜白肉|壽喜燒|hotpot/.test(
+      lower
+    )
+  ) {
+    return `${city}${district ? '・' + district : ''}熱門排隊人氣鍋物名店，精熬特製濃醇高湯搭配嚴選肉品與新鮮時蔬，暖心聚餐必吃`;
+  }
+
+  // 咖啡 / 甜點 / 冰品 / 下午茶
+  if (
+    /咖啡|cafe|coffee|甜點|布丁|蛋糕|bakery|烘焙|冰|豆花|泡芙|下午茶|茶飲|奶茶|甘味|鬆餅/.test(
       lower
     )
   ) {
@@ -582,12 +669,20 @@ export function resolvePlaceDescription(
   }
 
   // 米粿 / 肉粿 / 碗粿 / 割包 / 飯糰 / 潤餅 / 春捲
-  if (/米粿|肉粿|九層粿|碗粿|割包|刈包|蝦仁飯|肉粽|油飯|鹹粥|潤餅|春捲/.test(clean)) {
+  if (
+    /米粿|肉粿|九層粿|碗粿|割包|刈包|蝦仁飯|肉粽|油飯|鹹粥|潤餅|春捲|肉燥飯|魯肉飯|滷肉飯|火雞肉飯/.test(
+      clean
+    )
+  ) {
     return `${city}${district ? '・' + district : ''}傳承在地傳統古早味手作名點，香氣濃郁口感紮實，在地老字號經典美味`;
   }
 
   // 鱔魚意麵 / 鍋燒意麵 / 牛肉麵 / 麵食 / 拉麵
-  if (/鱔魚|意麵|鍋燒|牛肉麵|拉麵|米粉|麵線|麵館|冬粉|刀削麵|烏龍麵|蕎麥麵/.test(clean)) {
+  if (
+    /鱔魚|意麵|鍋燒|牛肉麵|拉麵|米粉|麵線|麵館|麵店|冬粉|刀削麵|烏龍麵|蕎麥麵|餛飩|抄手/.test(
+      clean
+    )
+  ) {
     return `${city}${district ? '・' + district : ''}在地排隊人氣麵食名攤，麵條Q彈有勁搭配香濃精熬湯頭，老饕必點`;
   }
 
@@ -597,18 +692,27 @@ export function resolvePlaceDescription(
   }
 
   // 豆花 / 冰品 / 甜品 / 綠豆湯 / 八寶冰
-  if (/豆花|挫冰|刨冰|雪花冰|綠豆湯|紅豆湯|八寶冰|圓仔冰|仙草|愛玉/.test(clean)) {
+  if (
+    /豆花|挫冰|刨冰|雪花冰|綠豆湯|紅豆湯|八寶冰|圓仔冰|仙草|愛玉/.test(
+      clean
+    )
+  ) {
     return `${city}${district ? '・' + district : ''}傳承古法手工古早味甜品冰店，料多實在清甜爽口，消暑解膩首選`;
   }
 
-  // 早餐 / 蛋餅 / 燒餅 / 豆漿
-  if (/早餐|早點|蛋餅|燒餅|豆漿|飯糰|吐司/.test(clean)) {
-    return `${city}${district ? '・' + district : ''}超人氣在地傳統排隊早餐店，招牌現做熱騰騰早點，開啟美好一日活力`;
+  // 早餐 / 早點 / 蛋餅 / 燒餅 / 豆漿 / 早午餐
+  if (/早餐|早點|蛋餅|燒餅|豆漿|飯糰|吐司|早午餐|brunch/.test(clean)) {
+    return `${city}${district ? '・' + district : ''}超人氣在地傳統排隊早餐早午餐店，現點現做熱騰騰元氣餐點，開啟美好一日活力`;
   }
 
-  // 炭烤 / 串燒 / 鹹酥雞 / 炸雞 / 燒肉
-  if (/炭烤|串燒|鹹酥雞|炸雞|雞排|燒肉|烤肉|燒烤/.test(clean)) {
-    return `${city}${district ? '・' + district : ''}在地熱門宵夜與聚會首選，現點現烤現炸香氣撲鼻，外酥內嫩多汁過癮`;
+  // 生猛海鮮 / 熱炒 / 快炒 / 台菜
+  if (/海鮮|海產|熱炒|快炒|台菜|家常菜|活海鮮|海味|水產/.test(clean)) {
+    return `${city}${district ? '・' + district : ''}在地生猛海鮮熱炒名店，當季漁港直送漁獲現點現炒，鑊氣十足價格實惠`;
+  }
+
+  // 炭烤 / 串燒 / 燒肉
+  if (/炭烤|串燒|燒肉|烤肉|燒烤/.test(clean)) {
+    return `${city}${district ? '・' + district : ''}在地熱門宵夜與聚會首選，現點現烤香氣撲鼻，肉質嫩口多汁過癮`;
   }
 
   // 圖書館 / 書店 / 選物店 / 文創空間
@@ -637,15 +741,22 @@ export function resolvePlaceDescription(
   }
 
   // 4. Fallback based on category
+  if (subCategory === 'bar') {
+    return `${city}${district ? '・' + district : ''}風格微醺酒吧與夜生活推薦熱點，特色特調與放鬆舒適氛圍，適合夜晚聚會小酌`;
+  }
   if (subCategory === 'snack_dessert') {
-    return `${city}在地好評推薦甜點咖啡，適合放鬆品味香甜午後`;
+    return `${city}${district ? '・' + district : ''}在地精緻點心甜品店，手作美味甜品與香醇飲品，午後悠閒放鬆時光首選`;
+  }
+  if (subCategory === 'souvenir') {
+    return `${city}${district ? '・' + district : ''}在地口碑名產伴手禮名店，送禮自用皆宜，深具地方特色風味`;
   }
   if (subCategory === 'museum' || subCategory === 'landmark') {
-    return `${city}知名文化歷史景觀，深度體驗在地故事與美景`;
+    return `${city}${district ? '・' + district : ''}重要文化歷史地標景觀，深度感受在地人文底蘊與建築風貌`;
   }
   if (subCategory === 'trail') {
-    return `${city}戶外自然放鬆步道，適合悠閒散步拍照`;
+    return `${city}${district ? '・' + district : ''}戶外自然綠意步道與景觀勝地，視野開闊空氣清新，悠閒散心首選`;
   }
 
-  return `${city}${district ? '・' + district : ''} Google Maps 在地高評價推薦熱點，深獲旅人與老饕喜愛`;
+  // General meal / restaurant fallback
+  return `${city}${district ? '・' + district : ''}在地人氣推薦排隊名店，食材新鮮風味獨特，深受在地老饕與旅人喜愛`;
 }

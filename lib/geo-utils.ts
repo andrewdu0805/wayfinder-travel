@@ -1722,54 +1722,29 @@ export function inferPlaceCategoryByName(text: string): {
   sub_category: string;
   estimated_stay_mins: number;
 } {
-  const lower = (text || '').toLowerCase();
-  if (/伴手禮|名產|禮盒|餅店|糕餅|鳳梨酥|肉乾|茶葉/.test(text)) {
+  const lower = (text || '').toLowerCase().trim();
+  if (!lower) {
+    return {
+      primary_category: 'restaurant',
+      sub_category: 'meal',
+      estimated_stay_mins: 80,
+    };
+  }
+
+  // 1. Souvenir / Local Specialty
+  if (
+    /伴手禮|名產|禮盒|餅店|糕餅|鳳梨酥|肉乾|茶葉|大餅|蛋黃酥|太陽餅|奶油酥餅|牛軋糖/.test(
+      lower
+    )
+  ) {
     return {
       primary_category: 'restaurant',
       sub_category: 'souvenir',
       estimated_stay_mins: 20,
     };
   }
-  if (
-    /咖啡|甜點|冰|茶|下午茶|布丁|豆花|蛋糕|烘焙|cafe|coffee|bakery|dessert/.test(
-      lower
-    )
-  ) {
-    return {
-      primary_category: 'restaurant',
-      sub_category: 'snack_dessert',
-      estimated_stay_mins: 50,
-    };
-  }
-  if (
-    /藝文中心|文化中心|藝術中心|文化園區|文創園區|美術館|博物館|展覽館|展覽|特區|藝術館|歷史館|鐵道館|糖廠|工坊|藝文|展演|故事館|紀念館|museum|gallery|art center/.test(
-      lower
-    )
-  ) {
-    return {
-      primary_category: 'museum_culture',
-      sub_category: 'museum',
-      estimated_stay_mins: 110,
-    };
-  }
-  if (
-    /古蹟|碧山巖|寺|廟|宮|神社|城隍|紀念堂|老街|地標|休閒中心|砲台|燈塔|城門|堡/.test(
-      lower
-    )
-  ) {
-    return {
-      primary_category: 'museum_culture',
-      sub_category: 'landmark',
-      estimated_stay_mins: 60,
-    };
-  }
-  if (/步道|公園|山|森林|自然|風景|海岸|吊橋/.test(lower)) {
-    return {
-      primary_category: 'nature_outdoor',
-      sub_category: 'trail',
-      estimated_stay_mins: 90,
-    };
-  }
+
+  // 2. Bar / Craft Beer / Bistro / Nightlife / Wine Shop (Evaluate BEFORE dessert & nature so 自然酒 / 精釀 doesn't get misrouted!)
   if (
     /餐酒|酒吧|bistro|\bbar\b|居酒屋|啤酒|精釀|小酌|調酒|\bpub\b|\bwine\b|\bbeer\b|酉|微醺|釀造|酒造|品酒|bottle|瓶子|選酒|自然酒|紅白酒|葡萄酒|洋酒|烈酒|清酒|威士忌|whisky|whiskey|cocktail|gin|sake|taproom|draft|酒館|酒莊/.test(
       lower
@@ -1781,6 +1756,79 @@ export function inferPlaceCategoryByName(text: string): {
       estimated_stay_mins: 90,
     };
   }
+
+  // 3. Desserts, Coffee, Bakeries, Ice Cream (Excluding 茶餐廳 which is a full meal!)
+  if (!lower.includes('茶餐廳')) {
+    if (
+      /咖啡|甜點|下午茶|布丁|豆花|蛋糕|烘焙|泡芙|鬆餅|奶茶|和菓子|刨冰|剉冰|雪花冰|冰淇淋|冰店|甘味|cafe|coffee|bakery|dessert|ice cream/.test(
+        lower
+      )
+    ) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'snack_dessert',
+        estimated_stay_mins: 50,
+      };
+    }
+    // Match tea/ice beverage only if explicitly drinks/shaved ice (e.g. 紅茶, 綠茶, 冰品)
+    if (/(?:紅茶|綠茶|烏龍茶|手搖|水果茶|抹茶|冰品|吃冰)/.test(lower)) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'snack_dessert',
+        estimated_stay_mins: 40,
+      };
+    }
+  }
+
+  // 4. Museums, Art Galleries, Cultural Parks & Exhibition Halls
+  if (
+    /藝文中心|文化中心|藝術中心|文化園區|文創園區|文創園|文創特區|藝術特區|美術館|博物館|展覽館|展覽|藝術館|歷史館|鐵道館|糖廠|展演|故事館|紀念館|故宮|天文館|科博館|科學館|海洋館|水族館|museum|gallery|art center/.test(
+      lower
+    )
+  ) {
+    return {
+      primary_category: 'museum_culture',
+      sub_category: 'museum',
+      estimated_stay_mins: 110,
+    };
+  }
+
+  // 5. Historic Landmarks, Temples, Heritage (CRITICAL: Do NOT match bare '堡' or '宮' which matches 漢堡 or 宮保!)
+  if (
+    /古蹟|歷史建築|紀念堂|宗祠|古厝|砲台|燈塔|城門|牌坊|神社|天后宮|城隍廟|關帝廟|文武廟|三清宮|佛寺|寺院|天主堂|大教堂|老街|地標|安平古堡|億載金城|紅毛城|赤崁樓|孔廟/.test(
+      lower
+    )
+  ) {
+    return {
+      primary_category: 'museum_culture',
+      sub_category: 'landmark',
+      estimated_stay_mins: 60,
+    };
+  }
+
+  // 6. Amusement Parks & Theme Parks
+  if (/樂園|遊樂場|摩天輪|卡丁車|水上樂園|主題樂園|主題公園/.test(lower)) {
+    return {
+      primary_category: 'theme_park_leisure',
+      sub_category: 'amusement_park',
+      estimated_stay_mins: 240,
+    };
+  }
+
+  // 7. Nature Outdoors, Hiking Trails, Scenic Areas (CRITICAL: Do NOT match bare '山' which matches 鼓山, 鳳山, 岡山, 中山路!)
+  if (
+    /登山步道|登山|步道|健行|步徑|林道|古道|森林公園|國家公園|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|海水浴場|海岸風景|觀景台|瞭望台|神木|露營區/.test(
+      lower
+    )
+  ) {
+    return {
+      primary_category: 'nature_outdoor',
+      sub_category: 'trail',
+      estimated_stay_mins: 90,
+    };
+  }
+
+  // 8. General Dining / Meals (Default fallback for all eateries, Western/French/Japanese cuisine like Mon Poulet, roast chicken, noodles, etc.)
   return {
     primary_category: 'restaurant',
     sub_category: 'meal',
