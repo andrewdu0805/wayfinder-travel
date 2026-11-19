@@ -14,6 +14,7 @@ import {
 import { usePlaces } from '@/context/PlacesContext';
 import { ALL_AVAILABLE_CITIES } from '@/lib/default-data';
 import {
+  extractCoordsFromGoogleMapsUrl,
   extractRegionFromAddress,
   getCoordinatesForRegion,
   inferPlaceCategoryByName,
@@ -124,9 +125,11 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
       const text = await file.text();
       const nowIso = new Date().toISOString();
       const imported: SavedPlace[] = [];
+      const fileNameCityCheck = extractRegionFromAddress(file.name, null, '');
       const fallbackCity =
+        fileNameCityCheck.city ||
         selectedCityOverride ||
-        (activeCity && activeCity !== 'ALL' ? activeCity : '台北市');
+        (activeCity && activeCity !== 'ALL' ? activeCity : '台南市');
 
       if (file.name.endsWith('.json') || file.name.endsWith('.geojson')) {
         const json = JSON.parse(text);
@@ -166,10 +169,15 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
             const hasValidCoords =
               Array.isArray(coords) &&
               (Number(coords[0]) !== 0 || Number(coords[1]) !== 0);
-            const rawLng = hasValidCoords ? Number(coords[0]) : NaN;
-            const rawLat = hasValidCoords ? Number(coords[1]) : NaN;
             const gmapsUrl =
               props['Google Maps URL'] || props.google_maps_url || '';
+            const urlCoords = extractCoordsFromGoogleMapsUrl(gmapsUrl);
+            const rawLng = hasValidCoords
+              ? Number(coords[0])
+              : urlCoords?.lng ?? NaN;
+            const rawLat = hasValidCoords
+              ? Number(coords[1])
+              : urlCoords?.lat ?? NaN;
 
             const region = extractRegionFromAddress(
               `${rawAddress} ${title} ${rawTitle} ${gmapsUrl}`,
@@ -250,16 +258,15 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
             decodedUrl = decodeURIComponent(url);
           } catch {}
 
+          const urlCoords = extractCoordsFromGoogleMapsUrl(url);
           const region = extractRegionFromAddress(
             `${sep.foundAddress || ''} ${title} ${firstCol} ${note} ${decodedUrl}`,
-            null,
+            urlCoords,
             fallbackCity
           );
-          const coords = getCoordinatesForRegion(
-            region.city,
-            region.district,
-            title
-          );
+          const coords =
+            urlCoords ||
+            getCoordinatesForRegion(region.city, region.district, title);
           const cat = inferPlaceCategoryByName(`${title} ${note}`);
 
           imported.push({

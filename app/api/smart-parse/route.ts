@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
+  extractCoordsFromGoogleMapsUrl,
   extractRegionFromAddress,
   getCoordinatesForRegion,
   separateNameAndAddress,
@@ -248,7 +249,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const rawInput: string = (body.input || '').trim();
-    const defaultCity: string = body.defaultCity || '台北市';
+    const rawDefaultCity: string = (body.defaultCity || '').trim();
+    const defaultCity: string = rawDefaultCity || '台南市';
     const skipGemini: boolean = Boolean(body.skipGemini);
     const categoryConfigs: CategoryConfig[] =
       body.categoryConfigs || DEFAULT_CATEGORY_CONFIGS;
@@ -268,37 +270,36 @@ export async function POST(req: NextRequest) {
     let resolvedInput = rawInput;
     let urlDetectedName: string | undefined;
     let urlDetectedAddress: string | undefined;
-    let urlDetectedCoords: { lat: number; lng: number } | undefined;
+    let urlDetectedCoords: { lat: number; lng: number } | undefined =
+      extractCoordsFromGoogleMapsUrl(rawInput) || undefined;
 
     // Step 1: Detect Google Maps short URLs or desktop URLs and extract destination metadata
     const urlMatch = rawInput.match(/https?:\/\/[^\s)]+/i);
     if (urlMatch) {
       const targetUrl = urlMatch[0];
-      try {
-        const res = await fetch(targetUrl, {
-          method: 'GET',
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
-          },
-          redirect: 'follow',
-          signal: AbortSignal.timeout(4500),
-        });
+      // Only fetch URL over network if it's a short link (maps.app.goo.gl / goo.gl) or we don't have coordinates yet
+      const isShortUrl = /goo\.gl|maps\.app/i.test(targetUrl);
+      if (isShortUrl || !urlDetectedCoords) {
+        try {
+          const res = await fetch(targetUrl, {
+            method: 'GET',
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+            },
+            redirect: 'follow',
+            signal: AbortSignal.timeout(3500),
+          });
 
-        const finalUrl = res.url || targetUrl;
-        const decodedUrl = decodeURIComponent(finalUrl);
-        resolvedInput = `${rawInput} [展開網址: ${decodedUrl}]`;
+          const finalUrl = res.url || targetUrl;
+          const decodedUrl = decodeURIComponent(finalUrl);
+          resolvedInput = `${rawInput} [展開網址: ${decodedUrl}]`;
 
-        // Check coordinates @lat,lng
-        const coordMatch = decodedUrl.match(/@([0-9.-]+),([0-9.-]+)/);
-        if (coordMatch) {
-          const lat = parseFloat(coordMatch[1]);
-          const lng = parseFloat(coordMatch[2]);
-          if (!isNaN(lat) && !isNaN(lng)) {
-            urlDetectedCoords = { lat, lng };
+          const extractedFromFinal = extractCoordsFromGoogleMapsUrl(decodedUrl);
+          if (extractedFromFinal) {
+            urlDetectedCoords = extractedFromFinal;
           }
-        }
 
         // 1. Parse HTML title tag (e.g. <title>阿蓮牛肉湯 - Google 地圖</title>)
         const html = await res.text();
@@ -372,8 +373,9 @@ export async function POST(req: NextRequest) {
             urlDetectedName || ''
           }]\n[系統預先分離地址: ${urlDetectedAddress || ''}]`;
         }
-      } catch {
-        // Fall back to text parsing if network request is blocked or times out
+        } catch {
+          // Fall back to text parsing if network request is blocked or times out
+        }
       }
     }
 
@@ -655,10 +657,16 @@ ${resolvedInput}`,
         .filter(Boolean)
         .join(' ');
 
+      // Check if an explicit city was detected from the text or coordinates (without fallback)
+      const explicitRegion = extractRegionFromAddress(
+        fullLocationString,
+        urlDetectedCoords,
+        ''
+      );
       const region = extractRegionFromAddress(
         fullLocationString,
         urlDetectedCoords,
-        defaultCity || '台北市'
+        defaultCity || '台南市'
       );
 
       let placeId = `custom_${cand.name.replace(/\s+/g, '_').toLowerCase()}`;
@@ -675,16 +683,37 @@ ${resolvedInput}`,
       );
       let lat = urlDetectedCoords?.lat ?? fallbackCoords.lat;
       let lng = urlDetectedCoords?.lng ?? fallbackCoords.lng;
+      let hasExactCoords = Boolean(urlDetectedCoords);
       let rating: number | null = 4.5;
       let weekdayDescriptions = ['每日 10:00–21:00'];
       let dailyHours = { open: '10:00', close: '21:00' };
 
       if (googleMapsApiKey && googleMapsApiKey !== 'your-google-maps-api-key') {
         try {
+          const searchCityHint =
+            explicitRegion.city || rawDefaultCity || '台灣';
           const searchQuery =
             cand.addressHint && !cand.name.includes(cand.addressHint)
               ? `${cand.name} ${cand.addressHint}`
-              : `${cand.name} ${region.city}`;
+              : urlDetectedCoords
+              ? cand.name
+              : `${cand.name} ${searchCityHint}`;
+
+          const requestBody: Record<string, unknown> = {
+            textQuery: searchQuery,
+            languageCode: 'zh-TW',
+          };
+          if (urlDetectedCoords) {
+            requestBody.locationBias = {
+              circle: {
+                center: {
+                  latitude: urlDetectedCoords.lat,
+                  longitude: urlDetectedCoords.lng,
+                },
+                radius: 1500.0,
+              },
+            };
+          }
 
           const placesRes = await fetch(
             'https://places.googleapis.com/v1/places:searchText',
@@ -696,10 +725,7 @@ ${resolvedInput}`,
                 'X-Goog-FieldMask':
                   'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus',
               },
-              body: JSON.stringify({
-                textQuery: searchQuery,
-                languageCode: 'zh-TW',
-              }),
+              body: JSON.stringify(requestBody),
               signal: AbortSignal.timeout(5000),
             }
           );
@@ -711,24 +737,22 @@ ${resolvedInput}`,
               if (top.displayName?.text) {
                 cand.name = top.displayName.text;
               }
+              if (top.location?.latitude && top.location?.longitude) {
+                lat = top.location.latitude;
+                lng = top.location.longitude;
+                hasExactCoords = true;
+              }
               if (top.formattedAddress) {
                 formattedAddress = top.formattedAddress;
                 const officialRegion = extractRegionFromAddress(
                   top.formattedAddress,
-                  top.location
-                    ? {
-                        lat: top.location.latitude,
-                        lng: top.location.longitude,
-                      }
-                    : null,
+                  hasExactCoords ? { lat, lng } : null,
                   region.city
                 );
                 region.city = officialRegion.city;
                 region.district = officialRegion.district;
                 region.country = officialRegion.country;
               }
-              lat = top.location?.latitude ?? lat;
-              lng = top.location?.longitude ?? lng;
               rating = top.rating ?? rating;
               if (top.regularOpeningHours?.weekdayDescriptions) {
                 weekdayDescriptions =
@@ -761,6 +785,37 @@ ${resolvedInput}`,
       region.city = finalRegion.city;
       region.district = finalRegion.district;
       region.country = finalRegion.country;
+
+      // If we have exact coordinates (from S2CellId in URL or Google Places API), verify official Taiwan district polygon via BigDataCloud if address omitted explicit district
+      if (
+        hasExactCoords &&
+        region.country === '台灣' &&
+        !/^\d{3}/.test(formattedAddress)
+      ) {
+        try {
+          const bdcRes = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=zh`,
+            { signal: AbortSignal.timeout(2000) }
+          );
+          if (bdcRes.ok) {
+            const bdc = await bdcRes.json();
+            const bdcCity = String(
+              bdc.principalSubdivision || bdc.city || ''
+            )
+              .replace('臺', '台')
+              .trim();
+            const bdcDist = String(bdc.locality || '').trim();
+            if (bdcCity && /[市縣]$/.test(bdcCity)) {
+              region.city = bdcCity;
+            }
+            if (bdcDist && /[區市鎮鄉]$/.test(bdcDist)) {
+              region.district = bdcDist;
+            }
+          }
+        } catch {
+          // fallback to local centroid/postal code resolution
+        }
+      }
 
       parsedPlaces.push({
         id: `place-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,

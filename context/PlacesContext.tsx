@@ -20,6 +20,7 @@ import {
   INITIAL_SAVED_PLACES,
 } from '@/lib/default-data';
 import {
+  extractCoordsFromGoogleMapsUrl,
   extractRegionFromAddress,
   getCoordinatesForRegion,
   inferPlaceCategoryByName,
@@ -85,7 +86,6 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   let nextSub = p.sub_category;
   let nextStay = p.estimated_stay_mins;
 
-  // Detect records poisoned by the old hardcoded '台灣高雄市鹽埕區' CSV/Takeout placeholder
   const isImportedRecord =
     p.id?.startsWith('csv-') ||
     p.id?.startsWith('takeout-') ||
@@ -94,50 +94,30 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     p.custom_tags?.includes('#CSV匯入') ||
     p.custom_tags?.includes('#Takeout匯入');
 
-  const isPoisonedKaohsiungPlaceholder =
-    isImportedRecord &&
-    (nextAddr === '台灣高雄市鹽埕區' ||
-      (nextCity === '高雄市' &&
-        nextDist === '鹽埕區' &&
-        !/高雄|鹽埕|駁二|大溝頂|鴨肉珍|港園|銀座聚場/.test(
-          `${p.name} ${p.user_notes || ''}`
-        )));
-
-  if (isPoisonedKaohsiungPlaceholder) {
-    // Strip the fake Kaohsiung placeholder address and fake 22.6234, 120.2835 coordinates
-    let decodedUrlText = '';
-    try {
-      decodedUrlText = decodeURIComponent(p.google_maps_url || '');
-    } catch {
-      decodedUrlText = p.google_maps_url || '';
-    }
-    const cleanReg = extractRegionFromAddress(
-      `${sep.foundAddress || ''} ${nextName} ${p.name} ${p.user_notes || ''} ${decodedUrlText}`,
-      null,
-      '台北市'
-    );
-    nextCity = cleanReg.city;
-    nextDist = cleanReg.district;
-    nextAddr = sep.foundAddress || `${cleanReg.country}${cleanReg.city}${cleanReg.district}`;
-    const newCoords = getCoordinatesForRegion(nextCity, nextDist, nextName);
-    nextLat = newCoords.lat;
-    nextLng = newCoords.lng;
-
-    // Also fix category if it was blindly defaulted to restaurant/meal
-    const inferredCat = inferPlaceCategoryByName(
-      `${nextName} ${p.user_notes || ''}`
-    );
-    if (nextPrimary === 'restaurant' && nextSub === 'meal') {
-      nextPrimary = inferredCat.primary_category;
-      nextSub = inferredCat.sub_category;
-      nextStay = inferredCat.estimated_stay_mins;
-    }
+  let decodedUrlText = '';
+  try {
+    decodedUrlText = decodeURIComponent(p.google_maps_url || '');
+  } catch {
+    decodedUrlText = p.google_maps_url || '';
   }
+
+  // 1. If google_maps_url contains an S2CellId (!1s0x34...:0x...) or @lat,lng, extract exact building coordinates!
+  const urlCoords = extractCoordsFromGoogleMapsUrl(p.google_maps_url || '');
+  if (urlCoords) {
+    nextLat = urlCoords.lat;
+    nextLng = urlCoords.lng;
+  }
+
+  // 2. Check if formatted_address is just a generic city/district placeholder without any street/road/number
+  const isPlaceholderAddr =
+    !nextAddr ||
+    nextAddr === '台灣高雄市鹽埕區' ||
+    !/[路街段巷弄號大道村里丁目番地]/.test(nextAddr);
 
   if (sep.foundAddress && sep.cleanName && sep.cleanName !== p.name) {
     nextName = sep.cleanName;
     if (
-      !nextAddr ||
+      isPlaceholderAddr ||
       nextAddr.includes('鹽埕區臺南市') ||
       nextAddr.includes('鹽埕區台南市') ||
       nextAddr.includes('市中心') ||
@@ -148,11 +128,27 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     }
   }
 
-  // Detect true region from full text + coordinates (skip fake coords if imported placeholder)
+  // 3. Detect true region from full text + coordinates
+  // CRITICAL: Do NOT include nextAddr if it is a placeholder (e.g. '台灣台北市大安區' or '台灣高雄市鹽埕區'),
+  // otherwise the old placeholder city/district will override coordinate/name detection!
+  const addressTextForDetection = [
+    sep.foundAddress || '',
+    isPlaceholderAddr ? '' : nextAddr,
+    nextName,
+    p.name,
+    p.user_notes || '',
+    decodedUrlText,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const coordsForDetection =
+    urlCoords || (!isPlaceholderAddr ? { lat: nextLat, lng: nextLng } : null);
+
   const reg = extractRegionFromAddress(
-    `${sep.foundAddress || ''} ${nextAddr} ${nextName} ${p.name}`,
-    isPoisonedKaohsiungPlaceholder ? null : { lat: nextLat, lng: nextLng },
-    nextCity || '台北市'
+    addressTextForDetection,
+    coordsForDetection,
+    isPlaceholderAddr ? '台南市' : nextCity || '台南市'
   );
 
   if (reg.city && reg.district) {
@@ -160,7 +156,25 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     nextDist = reg.district;
   }
 
-  // Also clean up formatted_address if it still has old placeholder "市中心"
+  if (isImportedRecord && isPlaceholderAddr) {
+    nextAddr =
+      sep.foundAddress || `${reg.country}${nextCity}${nextDist}`;
+    if (!urlCoords) {
+      const newCoords = getCoordinatesForRegion(nextCity, nextDist, nextName);
+      nextLat = newCoords.lat;
+      nextLng = newCoords.lng;
+    }
+    const inferredCat = inferPlaceCategoryByName(
+      `${nextName} ${p.user_notes || ''}`
+    );
+    if (nextPrimary === 'restaurant' && nextSub === 'meal') {
+      nextPrimary = inferredCat.primary_category;
+      nextSub = inferredCat.sub_category;
+      nextStay = inferredCat.estimated_stay_mins;
+    }
+  }
+
+  // Clean up formatted_address if it still has old placeholder "市中心"
   if (nextAddr.includes('市中心') && nextDist !== '市中心') {
     nextAddr = nextAddr.replace('市中心', nextDist);
   }
@@ -190,6 +204,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncMessage, setLastSyncMessage] = useState<string | null>(null);
   const enrichedIdsRef = React.useRef<Set<string>>(new Set());
+  const isEnrichingRef = React.useRef<boolean>(false);
 
   // Hydrate from localStorage on client mount
   useEffect(() => {
@@ -291,85 +306,87 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
   // Automatically enrich CSV/Takeout imported places in the background via /api/smart-parse
   // so they get exact official addresses, cities, districts, and coordinates
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || isEnrichingRef.current) return;
     const unenriched = places.filter((p) => {
       if (enrichedIdsRef.current.has(p.id)) return false;
       const isCsvOrTakeout =
         p.id?.startsWith('csv-') ||
         p.id?.startsWith('takeout-') ||
         p.google_place_id?.startsWith('csv_') ||
-        p.google_place_id?.startsWith('takeout_');
+        p.google_place_id?.startsWith('takeout_') ||
+        p.custom_tags?.includes('#CSV匯入') ||
+        p.custom_tags?.includes('#Takeout匯入');
       if (!isCsvOrTakeout) return false;
       // Needs enrichment if formatted_address has no street/number (號/路/街)
-      return !/[路街段巷弄號]/.test(p.formatted_address || '');
+      return !/[路街段巷弄號大道]/.test(p.formatted_address || '');
     });
 
     if (unenriched.length === 0) return;
 
-    let cancelled = false;
+    isEnrichingRef.current = true;
     (async () => {
-      for (const item of unenriched) {
-        if (cancelled) break;
-        enrichedIdsRef.current.add(item.id);
-        try {
-          const queryInput =
-            item.google_maps_url &&
-            !item.google_maps_url.includes('maps/search/?api=1&query=')
-              ? `${item.name} ${item.google_maps_url}`
-              : item.name;
-          const res = await fetch('/api/smart-parse', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              input: queryInput,
-              defaultCity: item.city || '台北市',
-              skipGemini: true,
-              categoryConfigs,
-              geminiApiKey: settings.geminiApiKey,
-              googleMapsApiKey: settings.googleMapsApiKey,
-            }),
-          });
-          if (!res.ok) continue;
-          const data = await res.json();
-          const enriched: SavedPlace | undefined = data.places?.[0];
-          if (enriched && !cancelled) {
-            const applyEnriched = (p: SavedPlace): SavedPlace => ({
-              ...p,
-              google_place_id: enriched.google_place_id || p.google_place_id,
-              formatted_address:
-                enriched.formatted_address || p.formatted_address,
-              country: enriched.country || p.country,
-              city: enriched.city || p.city,
-              district: enriched.district || p.district,
-              latitude: enriched.latitude || p.latitude,
-              longitude: enriched.longitude || p.longitude,
-              primary_category:
-                enriched.primary_category || p.primary_category,
-              sub_category: enriched.sub_category || p.sub_category,
-              rating: enriched.rating ?? p.rating,
-              opening_hours_json:
-                enriched.opening_hours_json || p.opening_hours_json,
+      try {
+        for (const item of unenriched) {
+          if (enrichedIdsRef.current.has(item.id)) continue;
+          enrichedIdsRef.current.add(item.id);
+          try {
+            const queryInput =
+              item.google_maps_url &&
+              !item.google_maps_url.includes('maps/search/?api=1&query=')
+                ? `${item.name} ${item.google_maps_url}`
+                : item.name;
+            const res = await fetch('/api/smart-parse', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                input: queryInput,
+                defaultCity: '',
+                skipGemini: true,
+                categoryConfigs,
+                geminiApiKey: settings.geminiApiKey,
+                googleMapsApiKey: settings.googleMapsApiKey,
+              }),
             });
-            setPlaces((prev) =>
-              prev.map((p) => (p.id === item.id ? applyEnriched(p) : p))
-            );
-            setRecentUpserts((prev) =>
-              prev.map((rec) =>
-                rec.place.id === item.id
-                  ? { ...rec, place: applyEnriched(rec.place) }
-                  : rec
-              )
-            );
+            if (!res.ok) continue;
+            const data = await res.json();
+            const enriched: SavedPlace | undefined = data.places?.[0];
+            if (enriched) {
+              const applyEnriched = (p: SavedPlace): SavedPlace => ({
+                ...p,
+                google_place_id: enriched.google_place_id || p.google_place_id,
+                formatted_address:
+                  enriched.formatted_address || p.formatted_address,
+                country: enriched.country || p.country,
+                city: enriched.city || p.city,
+                district: enriched.district || p.district,
+                latitude: enriched.latitude || p.latitude,
+                longitude: enriched.longitude || p.longitude,
+                primary_category:
+                  enriched.primary_category || p.primary_category,
+                sub_category: enriched.sub_category || p.sub_category,
+                rating: enriched.rating ?? p.rating,
+                opening_hours_json:
+                  enriched.opening_hours_json || p.opening_hours_json,
+              });
+              setPlaces((prev) =>
+                prev.map((p) => (p.id === item.id ? applyEnriched(p) : p))
+              );
+              setRecentUpserts((prev) =>
+                prev.map((rec) =>
+                  rec.place.id === item.id
+                    ? { ...rec, place: applyEnriched(rec.place) }
+                    : rec
+                )
+              );
+            }
+          } catch {
+            // ignore individual lookup errors
           }
-        } catch {
-          // ignore individual lookup errors
         }
+      } finally {
+        isEnrichingRef.current = false;
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     isHydrated,
     places,
