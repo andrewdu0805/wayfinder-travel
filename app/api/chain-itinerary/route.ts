@@ -293,6 +293,7 @@ function buildPlanFromSelectedStops(params: {
   allNearbyCandidates: SavedPlace[];
   refreshedCount: number;
   excludedClosedPlaces: Array<{ name: string; reason: string }>;
+  endBufferMins?: number;
 }): ItineraryPlan {
   const {
     planId,
@@ -309,7 +310,15 @@ function buildPlanFromSelectedStops(params: {
     excludedClosedPlaces,
   } = params;
 
-  const STATION_BUFFER_MINS = 25;
+  const isStationEnd =
+    endAnchor?.anchor_type === 'hsr' || endAnchor?.anchor_type === 'train';
+  const STATION_BUFFER_MINS =
+    typeof params.endBufferMins === 'number'
+      ? params.endBufferMins
+      : isStationEnd || !endAnchor
+      ? 25
+      : 0;
+  const deadlineWord = isStationEnd || !endAnchor ? '發車' : '回到飯店';
   let activeSelection = [...selectedPlaces];
   let stayScaleFactor = 1.0;
   let timeFitNote: string | null = null;
@@ -343,6 +352,26 @@ function buildPlanFromSelectedStops(params: {
       };
 
       let { tMove, tStay } = calcRawNeeds(activeSelection);
+      // Drop non-pinned stops (from the end, but never the final souvenir/anchor stop) while the day is badly over budget
+      while (
+        tMove + tStay > netBudgetMins * 1.5 &&
+        activeSelection.length > 2
+      ) {
+        let dropIdx = -1;
+        for (let k = activeSelection.length - 2; k >= 0; k--) {
+          if (!activeSelection[k].isPinned) {
+            dropIdx = k;
+            break;
+          }
+        }
+        if (dropIdx === -1) break;
+        const dropped = activeSelection.splice(dropIdx, 1)[0];
+        excludedClosedPlaces.push({
+          name: dropped.place.name,
+          reason: `配合 ${returnDepartureTime} ${deadlineWord}，時間不夠而自動精簡此站`,
+        });
+        ({ tMove, tStay } = calcRawNeeds(activeSelection));
+      }
       if (tMove + tStay > netBudgetMins && netBudgetMins < 155 && activeSelection.length > 3) {
         // Very tight window (< 2.5h net): drop the afternoon tea stop or museum stop if not pinned
         const dropIdx = activeSelection.findIndex((s, idx) => idx === 2 && !s.isPinned);
@@ -350,7 +379,7 @@ function buildPlanFromSelectedStops(params: {
           const dropped = activeSelection.splice(dropIdx, 1)[0];
           excludedClosedPlaces.push({
             name: dropped.place.name,
-            reason: `配合 ${returnDepartureTime} 乘車死線，自動精簡此站以確保準時抵達車站`,
+            reason: `配合 ${returnDepartureTime} ${deadlineWord}，自動精簡此站以確保準時`,
           });
           ({ tMove, tStay } = calcRawNeeds(activeSelection));
         }
@@ -359,9 +388,13 @@ function buildPlanFromSelectedStops(params: {
       if (tMove + tStay > netBudgetMins) {
         const availableForStay = Math.max(60, netBudgetMins - tMove);
         stayScaleFactor = Math.max(0.5, Math.min(1.0, availableForStay / tStay));
-        timeFitNote = `⏱️ 已依「${startTime} 抵達 ～ ${returnDepartureTime} 發車（預留 ${STATION_BUFFER_MINS} 分鐘還車進站）」自動濃縮各站停留時間，確保準時抵達車站不誤點！`;
+        timeFitNote = isStationEnd || !endAnchor
+          ? `⏱️ 已依「${startTime} 出發 ～ ${returnDepartureTime} 發車（預留 ${STATION_BUFFER_MINS} 分鐘進站）」自動濃縮各站停留時間，確保準時搭上車！`
+          : `⏱️ 已依「${startTime} 出門 ～ ${returnDepartureTime} 回到飯店」自動濃縮各站停留時間。`;
       } else {
-        timeFitNote = `✅ 時間充裕：於 ${startTime} 出發，全行程結束抵達車站後距離 ${returnDepartureTime} 發車還有充裕緩衝時間！`;
+        timeFitNote = isStationEnd || !endAnchor
+          ? `✅ 時間充裕：${startTime} 出發，行程結束抵達車站後距離 ${returnDepartureTime} 發車還有充裕緩衝！`
+          : `✅ 時間充裕：${startTime} 出門，預計 ${returnDepartureTime} 前輕鬆回到飯店休息。`;
       }
     }
   }
@@ -543,6 +576,11 @@ function buildPlanFromSelectedStops(params: {
     travel_mode: travelMode,
     start_time: startTime,
     return_departure_time: returnDepartureTime || null,
+    time_fit_note: timeFitNote,
+    must_arrive_by:
+      returnDepartureTime && (isStationEnd || !endAnchor)
+        ? addMinutesToTime(returnDepartureTime, -STATION_BUFFER_MINS)
+        : null,
     origin,
     end_anchor: endAnchorSummary,
     stops,
@@ -561,6 +599,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const allPlaces: SavedPlace[] = body.places || [];
+    // strictDay = request comes from the multi-day planner with explicit per-day params;
+    // don't re-derive times / anchors / mode from the whole-trip text.
+    const strictDay: boolean = Boolean(body.strictDay);
     let origin = body.origin || {
       name: PRESET_DESTINATIONS[0].label,
       latitude: PRESET_DESTINATIONS[0].latitude,
@@ -573,7 +614,10 @@ export async function POST(req: NextRequest) {
     const intentBlocks: IntentStepBlock[] = body.intentBlocks || [];
 
     // 1. Natural language transport mode detection
-    if (/機車|騎車|摩托車|租車|騎機車/.test(intentText)) {
+    if (strictDay) {
+      if (travelMode === 'SCOOTER') radiusMeters = Math.max(radiusMeters, 8000);
+      if (travelMode === 'DRIVE') radiusMeters = Math.max(radiusMeters, 12000);
+    } else if (/機車|騎車|摩托車|租車|騎機車/.test(intentText)) {
       travelMode = 'SCOOTER';
       radiusMeters = Math.max(radiusMeters, 8000);
     } else if (/開車|自駕|汽車/.test(intentText)) {
@@ -587,29 +631,32 @@ export async function POST(req: NextRequest) {
 
     // 2. Natural language destination detection across all preset cities
     let targetCity = body.origin?.city || '台南市';
-    for (const dest of PRESET_DESTINATIONS) {
-      const cityClean = dest.city.replace('市', '').replace('縣', '').replace('府', '');
-      const distClean = dest.district.replace('區', '').replace('鄉', '').replace('鎮', '');
-      const regex = new RegExp(`${dest.city}|${cityClean}|${dest.district}|${distClean}`);
-      if (regex.test(intentText)) {
-        targetCity = dest.city;
-        if (!body.origin || !body.origin.latitude) {
-          origin = {
-            name: dest.label,
-            latitude: dest.latitude,
-            longitude: dest.longitude,
-          };
+    if (!strictDay) {
+      for (const dest of PRESET_DESTINATIONS) {
+        const cityClean = dest.city.replace('市', '').replace('縣', '').replace('府', '');
+        const distClean = dest.district.replace('區', '').replace('鄉', '').replace('鎮', '');
+        const regex = new RegExp(`${dest.city}|${cityClean}|${dest.district}|${distClean}`);
+        if (regex.test(intentText)) {
+          targetCity = dest.city;
+          if (!body.origin || !body.origin.latitude) {
+            origin = {
+              name: dest.label,
+              latitude: dest.latitude,
+              longitude: dest.longitude,
+            };
+          }
+          break;
         }
-        break;
       }
     }
 
     // 3. Extract Overnight Hotel / End-Anchor if mentioned (e.g. "今天晚上住在台南大飯店")
-    const endAnchor =
-      body.endAnchor || extractHotelEndAnchor(intentText, targetCity);
+    const endAnchor = strictDay
+      ? body.endAnchor || null
+      : body.endAnchor || extractHotelEndAnchor(intentText, targetCity);
 
     // If user stays at a hotel, also set origin to that hotel (or station nearby) if they are starting their day or ending their day there
-    if (endAnchor) {
+    if (endAnchor && !strictDay) {
       origin = {
         name: `${endAnchor.name}（出發／回程起訖點）`,
         latitude: endAnchor.latitude,
@@ -617,41 +664,49 @@ export async function POST(req: NextRequest) {
       };
     }
 
+    // Center used for "nearby" filtering (multi-day: hotel / city center rather than a far-away HSR station)
+    const searchCenter: { latitude: number; longitude: number } =
+      body.searchCenter && typeof body.searchCenter.latitude === 'number'
+        ? body.searchCenter
+        : origin;
+
     // Check if user requested a specific compact district (e.g. "中西區", "鹽埕區")
     const districtLockMatch = intentText.match(/(中西區|鹽埕區|大同區|台東區|安平區)/);
     const preferredDistrict = districtLockMatch ? districtLockMatch[1] : null;
     const isCompactWalkRequested =
-      travelMode === 'WALK' || /近一點|步行|走路/.test(intentText);
+      travelMode === 'WALK' || (!strictDay && /近一點|步行|走路/.test(intentText));
 
-    if (/中餐|午餐|中午|一日遊|旅遊|白天/.test(intentText) && startTime === '14:00') {
+    if (!strictDay && /中餐|午餐|中午|一日遊|旅遊|白天/.test(intentText) && startTime === '14:00') {
       startTime = '10:00';
     }
 
-    const { parsedArrivalTime, parsedDepartureTime } =
-      extractTimesFromPrompt(intentText);
+    const { parsedArrivalTime, parsedDepartureTime } = strictDay
+      ? { parsedArrivalTime: null, parsedDepartureTime: null }
+      : extractTimesFromPrompt(intentText);
     if (parsedArrivalTime) {
       startTime = parsedArrivalTime;
     }
     const returnDepartureTime: string | null =
       body.returnDepartureTime || parsedDepartureTime || null;
+    const endBufferMins: number | undefined =
+      typeof body.endBufferMins === 'number' ? body.endBufferMins : undefined;
 
     const { pinnedBySubCat, excludedIdsInPrompt } = parsePromptConstraints(
       intentText,
       allPlaces
     );
-    const sequence = parseIntentSequenceFromText(
-      intentText,
-      intentBlocks,
-      pinnedBySubCat
-    );
+    const sequence =
+      strictDay && intentBlocks.length > 0
+        ? intentBlocks
+        : parseIntentSequenceFromText(intentText, intentBlocks, pinnedBySubCat);
 
     const excludedClosedPlaces: Array<{ name: string; reason: string }> = [];
     const spatialCandidates: SavedPlace[] = [];
 
     for (const p of allPlaces) {
       const dist = calculateDistanceMeters(
-        origin.latitude,
-        origin.longitude,
+        searchCenter.latitude,
+        searchCenter.longitude,
         p.latitude,
         p.longitude
       );
@@ -878,6 +933,7 @@ export async function POST(req: NextRequest) {
           allNearbyCandidates: spatialCandidates,
           refreshedCount: spatialCandidates.length,
           excludedClosedPlaces,
+          endBufferMins,
         })
       );
     }
@@ -897,6 +953,7 @@ export async function POST(req: NextRequest) {
           allNearbyCandidates: spatialCandidates,
           refreshedCount: spatialCandidates.length,
           excludedClosedPlaces,
+          endBufferMins,
         })
       );
     }
