@@ -1315,11 +1315,49 @@ export function extractRegionFromAddress(
 } {
   const clean = (address || '').trim();
 
-  // 0. If clean contains a Google Maps URL with S2CellId (!1s0x...) or @lat,lng, extract exact coordinates automatically!
+  // 0. Extract coordinates from Google Maps URL if present, or use passed coords
   const urlCoords = extractCoordsFromGoogleMapsUrl(clean);
   const effectiveCoords = urlCoords || coords;
 
-  // 1. Japan detection
+  // 1. If effectiveCoords are present, COORDINATES TAKE ABSOLUTE PRIORITY!
+  // Any place's administrative district is strictly where its coordinates fall on the map.
+  if (
+    effectiveCoords &&
+    !isNaN(effectiveCoords.lat) &&
+    !isNaN(effectiveCoords.lng)
+  ) {
+    const { lat, lng } = effectiveCoords;
+    if (lat >= 31.0 && lat <= 45.5 && lng >= 129.0 && lng <= 145.5) {
+      return {
+        country: '日本',
+        city: '東京都',
+        district: '台東區',
+      };
+    }
+
+    if (lat >= 21.5 && lat <= 26.5 && lng >= 118.0 && lng <= 122.5) {
+      let bestDist = '';
+      let bestCity = '';
+      let minMeters = Infinity;
+      for (const c of DISTRICT_CENTROIDS) {
+        const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
+        if (d < minMeters) {
+          minMeters = d;
+          bestCity = c.city;
+          bestDist = c.district;
+        }
+      }
+      if (bestCity && bestDist && minMeters <= 35000) {
+        return {
+          country: '台灣',
+          city: bestCity,
+          district: bestDist,
+        };
+      }
+    }
+  }
+
+  // 2. Japan detection
   if (
     clean.includes('日本') ||
     clean.includes('東京都') ||
@@ -1341,7 +1379,7 @@ export function extractRegionFromAddress(
   let cityRaw = '';
   let district = '';
 
-  // 1.5. Taiwan 3-digit Postal Code (郵遞區號) detection (e.g. "700台灣台南市金華路四段93號" -> 700 -> 台南市・中西區)
+  // 3. Taiwan 3-digit Postal Code (郵遞區號) detection (e.g. "700台灣台南市金華路四段93號" -> 700 -> 台南市・中西區)
   const zipMatch = clean.match(
     /(?:^|\s|,)(\d{3})\d{0,3}\s*(?:台灣|臺灣|臺北市|台北市|新北市|桃園市|臺中市|台中市|臺南市|台南市|高雄市|基隆市|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|臺東|台東|澎湖|金門)/
   );
@@ -1350,7 +1388,7 @@ export function extractRegionFromAddress(
     district = TAIWAN_ZIP_TO_REGION[zipMatch[1]].district;
   }
 
-  // 2. Explicit Taiwan City detection (Chinese + English)
+  // 4. Explicit Taiwan City detection (Chinese + English)
   const twCityMatch = clean.match(
     /(台北市|臺北市|新北市|桃園市|台中市|臺中市|台南市|臺南市|高雄市|基隆市|新竹市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義市|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|臺東縣|澎湖縣|金門縣)/
   );
@@ -1395,7 +1433,7 @@ export function extractRegionFromAddress(
     }
   }
 
-  // 3. Match from known districts (e.g. 新化區 -> 台南市)
+  // 5. Match from known districts (e.g. 新化區 -> 台南市)
   if (!cityRaw || !district) {
     for (const [distKey, mappedCity] of Object.entries(DISTRICT_TO_CITY_MAP)) {
       if (clean.includes(distKey)) {
@@ -1413,7 +1451,7 @@ export function extractRegionFromAddress(
     }
   }
 
-  // 4. Match from known landmark/village/road hints (e.g. 永華里 / 湯德章大道 / 金華路四段 -> 台南市・中西區)
+  // 6. Match from known landmark/village/road hints (e.g. 永華里 / 湯德章大道 / 金華路四段 -> 台南市・中西區)
   if (!district) {
     for (const rule of LANDMARK_OR_ROAD_TO_DISTRICT) {
       if (rule.keywords.some((kw) => clean.includes(kw))) {

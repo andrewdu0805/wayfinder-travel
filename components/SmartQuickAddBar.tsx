@@ -252,26 +252,57 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
           const sep = separateNameAndAddress(firstCol);
           const title = sep.cleanName || firstCol;
           const note = cols[1] || '';
-          const url = cols[2] || '';
+          // Scan across all columns in this CSV row for coordinates:
+          // 1. Any Google Maps URL with S2CellId (!1s0x...) or pin (!3d...!4d...) or @lat,lng
+          // 2. Any explicit numeric lat, lng columns
+          let rowCoords: { lat: number; lng: number } | null = null;
+          let foundUrl = '';
+
+          for (let c = 0; c < cols.length; c++) {
+            const val = cols[c] || '';
+            if (/https?:\/\/[^\s)]+/i.test(val)) {
+              if (!foundUrl) foundUrl = val;
+              const extracted = extractCoordsFromGoogleMapsUrl(val);
+              if (extracted && !rowCoords) rowCoords = extracted;
+            }
+            // Check combined "lat, lng" in a column
+            const combMatch = val.match(/^([0-9]{2}\.[0-9]{3,8})\s*,\s*([0-9]{2,3}\.[0-9]{3,8})$/);
+            if (combMatch && !rowCoords) {
+              const p1 = parseFloat(combMatch[1]);
+              const p2 = parseFloat(combMatch[2]);
+              if (p1 >= 21.0 && p1 <= 26.5 && p2 >= 118.0 && p2 <= 123.0) rowCoords = { lat: p1, lng: p2 };
+              else if (p2 >= 21.0 && p2 <= 26.5 && p1 >= 118.0 && p1 <= 123.0) rowCoords = { lat: p2, lng: p1 };
+            }
+            // Check two adjacent numeric columns (lat, lng)
+            if (c + 1 < cols.length && !rowCoords) {
+              const n1 = parseFloat(cols[c]);
+              const n2 = parseFloat(cols[c + 1]);
+              if (!isNaN(n1) && !isNaN(n2)) {
+                if (n1 >= 21.0 && n1 <= 26.5 && n2 >= 118.0 && n2 <= 123.0) rowCoords = { lat: n1, lng: n2 };
+                else if (n2 >= 21.0 && n2 <= 26.5 && n1 >= 118.0 && n1 <= 123.0) rowCoords = { lat: n2, lng: n1 };
+              }
+            }
+          }
+
+          const url = foundUrl || cols[2] || '';
           let decodedUrl = url;
           try {
             decodedUrl = decodeURIComponent(url);
           } catch {}
 
-          const urlCoords = extractCoordsFromGoogleMapsUrl(url);
           const region = extractRegionFromAddress(
             `${sep.foundAddress || ''} ${title} ${firstCol} ${note} ${decodedUrl}`,
-            urlCoords,
+            rowCoords,
             fallbackCity
           );
           const coords =
-            urlCoords ||
+            rowCoords ||
             getCoordinatesForRegion(region.city, region.district, title);
           const cat = inferPlaceCategoryByName(`${title} ${note}`);
 
           imported.push({
             id: `csv-${Date.now()}-${i}`,
-            google_place_id: `csv_${title}`,
+            google_place_id: url || `csv_${title}`,
             name: title,
             formatted_address:
               sep.foundAddress ||
