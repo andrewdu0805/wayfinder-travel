@@ -205,6 +205,24 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
       nextAddr = '702臺南市南區夏林路67號';
     }
   } else if (
+    nextName.includes('總爺') ||
+    nextName.includes('麻豆總爺')
+  ) {
+    nextCity = '台南市';
+    nextDist = '麻豆區';
+    nextLat = 23.1873;
+    nextLng = 120.2599;
+    if (isPlaceholderAddr || !hasSpecificHouseNumber) {
+      nextAddr = '721臺南市麻豆區南勢里總爺5號';
+    }
+    // Only auto-correct category if it was defaulted to generic meal/restaurant!
+    // If the user already manually changed it to another category, leave it untouched!
+    if (nextPrimary === 'restaurant' && nextSub === 'meal') {
+      nextPrimary = 'museum_culture';
+      nextSub = 'landmark';
+      nextStay = 90;
+    }
+  } else if (
     nextCity === '台南市' &&
     nextDist === '永康區' &&
     (nextName.includes('西門路') ||
@@ -223,6 +241,19 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
       const newCoords = getCoordinatesForRegion(nextCity, nextDist, nextName);
       nextLat = newCoords.lat;
       nextLng = newCoords.lng;
+    }
+  }
+
+  // 4.5. Auto-correct places erroneously classified as "restaurant / meal" when their name clearly indicates culture, landmark, park, etc.
+  // Note: If user has explicitly changed the category to something else, this is skipped!
+  if (nextPrimary === 'restaurant' && nextSub === 'meal') {
+    const inferredCat = inferPlaceCategoryByName(
+      `${nextName} ${p.user_notes || ''}`
+    );
+    if (inferredCat.sub_category !== 'meal') {
+      nextPrimary = inferredCat.primary_category;
+      nextSub = inferredCat.sub_category;
+      nextStay = inferredCat.estimated_stay_mins;
     }
   }
 
@@ -436,9 +467,10 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                 district: enriched.district || p.district,
                 latitude: enriched.latitude || p.latitude,
                 longitude: enriched.longitude || p.longitude,
-                primary_category:
-                  enriched.primary_category || p.primary_category,
-                sub_category: enriched.sub_category || p.sub_category,
+                // CRITICAL: NEVER let background address/coordinate enrichment overwrite the user's category!
+                primary_category: p.primary_category,
+                sub_category: p.sub_category,
+                estimated_stay_mins: p.estimated_stay_mins,
                 rating: enriched.rating ?? p.rating,
                 opening_hours_json:
                   enriched.opening_hours_json || p.opening_hours_json,
@@ -453,7 +485,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                         enriched.name || p.name,
                         enriched.city || p.city,
                         enriched.district || p.district,
-                        enriched.sub_category || p.sub_category,
+                        p.sub_category,
                         enriched.formatted_address || p.formatted_address
                       ),
               });

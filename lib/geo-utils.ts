@@ -377,6 +377,19 @@ const LANDMARK_OR_ROAD_TO_DISTRICT: Array<{
     district: '仁德區',
   },
   {
+    keywords: [
+      '總爺藝文中心',
+      '總爺糖廠',
+      '總爺',
+      '麻豆總爺',
+      '麻豆代天府',
+      '南勢里總爺',
+      '總爺國小',
+    ],
+    city: '台南市',
+    district: '麻豆區',
+  },
+  {
     keywords: ['駁二', '大義街', '大勇路', '新樂街', '五福四路', '大成街', '七賢三路'],
     city: '高雄市',
     district: '鹽埕區',
@@ -1599,14 +1612,22 @@ export function inferPlaceCategoryByName(text: string): {
       estimated_stay_mins: 50,
     };
   }
-  if (/博物館|美術館|展覽|文創|藝術|文化|museum|gallery/.test(lower)) {
+  if (
+    /藝文中心|文化中心|藝術中心|文化園區|文創園區|美術館|博物館|展覽館|展覽|特區|藝術館|歷史館|鐵道館|糖廠|工坊|藝文|展演|故事館|紀念館|museum|gallery|art center/.test(
+      lower
+    )
+  ) {
     return {
       primary_category: 'museum_culture',
       sub_category: 'museum',
       estimated_stay_mins: 110,
     };
   }
-  if (/古蹟|碧山巖|寺|廟|宮|神社|城隍|紀念堂|老街|地標|休閒中心/.test(lower)) {
+  if (
+    /古蹟|碧山巖|寺|廟|宮|神社|城隍|紀念堂|老街|地標|休閒中心|砲台|燈塔|城門|堡/.test(
+      lower
+    )
+  ) {
     return {
       primary_category: 'museum_culture',
       sub_category: 'landmark',

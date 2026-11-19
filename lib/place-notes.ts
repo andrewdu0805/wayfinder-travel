@@ -238,6 +238,14 @@ export const KNOWN_PLACE_GOOGLE_MAPS_DESCRIPTIONS: KnownPlaceDesc[] = [
     description: '台南東區經典排隊夜市，集結各色在地特色點心與異國人氣美食',
   },
 
+  // 麻豆區
+  {
+    keywords: ['總爺藝文中心', '總爺糖廠', '總爺', '麻豆總爺'],
+    city: '台南市',
+    district: '麻豆區',
+    description: '明治製糖總爺工場古蹟建築群，綠意林蔭樟樹大道與紅磚洋樓工藝展館，漫步散心與賞析當代藝術展覽好去處',
+  },
+
   // ================= 高雄市 =================
   // 鹽埕區
   {

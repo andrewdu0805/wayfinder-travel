@@ -147,6 +147,21 @@ const BUILTIN_GAZETTEER: KnownPlaceTemplate[] = [
     default_notes: '台南龍崎在地深山古法稻殼燻羊肉，肉質細嫩無羶味，必點燻羊肉與蒜油麵線',
     tags: ['#台南美食', '#古法燻羊肉', '#龍崎必吃'],
   },
+  {
+    keywords: ['總爺藝文中心', '總爺糖廠', '總爺', '麻豆總爺'],
+    google_place_id: 'ChIJ_zongye_arts_center_tainan',
+    name: '總爺藝文中心',
+    formatted_address: '721台灣台南市麻豆區南勢里總爺5號',
+    latitude: 23.1873,
+    longitude: 120.2599,
+    primary_category: 'museum_culture',
+    sub_category: 'landmark',
+    estimated_stay_mins: 90,
+    rating: 4.5,
+    daily_hours: { open: '09:00', close: '17:00' },
+    default_notes: '明治製糖總爺工場古蹟建築群，綠意林蔭樟樹大道與紅磚洋樓工藝展館，漫步散心與賞析當代藝術展覽好去處',
+    tags: ['#市定古蹟', '#藝文特區', '#林蔭大道'],
+  },
 ];
 
 function inferCategoryHeuristic(
@@ -170,7 +185,7 @@ function inferCategoryHeuristic(
     configs.find((c) => c.sub_category === sub)?.default_stay_mins ?? fallback;
 
   if (
-    /伴手禮|名產|禮盒|蛋糕店|餅店|糕餅|銅鑼燒|肉紙|鳳梨酥|不二緻果|巴堂|舊振南/.test(
+    /伴手禮|名產|禮盒|蛋糕店|餅店|糕餅|銅鑼燒|肉紙|鳳梨酥|蜜餞|不二緻果|巴堂|舊振南/.test(
       text
     )
   ) {
@@ -182,7 +197,7 @@ function inferCategoryHeuristic(
     };
   }
   if (
-    /咖啡|甜點|冰|奶茶|下午茶|布丁|豆花|水煎包|車輪餅|雞蛋糕|和菓子|cafe|coffee/.test(
+    /咖啡|甜點|冰|奶茶|下午茶|布丁|豆花|水煎包|車輪餅|雞蛋糕|和菓子|泡芙|鬆餅|烘焙|cafe|coffee|bakery|dessert/.test(
       lower
     )
   ) {
@@ -193,7 +208,11 @@ function inferCategoryHeuristic(
       visit_status,
     };
   }
-  if (/博物館|美術館|展覽|特區|藝術館|歷史館|鐵道館|museum|gallery/.test(lower)) {
+  if (
+    /藝文中心|文化中心|藝術中心|文化園區|文創園區|博物館|美術館|展覽館|展覽|特區|藝術館|歷史館|鐵道館|糖廠|工坊|藝文|展演|故事館|紀念館|museum|gallery|art center/.test(
+      lower
+    )
+  ) {
     return {
       primary_category: 'museum_culture',
       sub_category: 'museum',
@@ -201,7 +220,11 @@ function inferCategoryHeuristic(
       visit_status,
     };
   }
-  if (/古蹟|神社|寺|廟|城隍|雷門|地標|景觀台/.test(lower)) {
+  if (
+    /古蹟|神社|寺|廟|宮|城隍|雷門|地標|景觀台|老街|砲台|燈塔|城門|堡/.test(
+      lower
+    )
+  ) {
     return {
       primary_category: 'museum_culture',
       sub_category: 'landmark',
