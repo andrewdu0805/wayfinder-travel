@@ -28,9 +28,7 @@ export function RouteVisualizerMap({
 }: RouteVisualizerMapProps) {
   const { categoryConfigs, updatePlaceInline, settings, updateSettings } =
     usePlaces();
-  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(
-    activePlan?.stops?.[0]?.place.id || null
-  );
+  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
 
   const effectiveApiKey =
     settings.googleMapsApiKey?.trim() ||
@@ -76,12 +74,10 @@ export function RouteVisualizerMap({
     }
   }, [settings.googleMapsApiKey, effectiveApiKey, updateSettings]);
 
-  // Sync selectedPlaceId if plan changes
+  // Reset selectedPlaceId to null when switching to a new plan so the user sees the full map unobstructed
   useEffect(() => {
-    if (stops.length > 0 && !selectedPlaceId) {
-      setSelectedPlaceId(stops[0].place.id);
-    }
-  }, [stops, selectedPlaceId]);
+    setSelectedPlaceId(null);
+  }, [activePlan?.id]);
 
   // Handle Google Maps auth failure gracefully
   useEffect(() => {
@@ -179,6 +175,10 @@ export function RouteVisualizerMap({
         ],
       });
       googleInfoWindowRef.current = new gmaps.InfoWindow();
+      googleMapInstanceRef.current.addListener('click', () => {
+        setSelectedPlaceId(null);
+        googleInfoWindowRef.current?.close();
+      });
     }
 
     const map = googleMapInstanceRef.current;
@@ -381,6 +381,10 @@ export function RouteVisualizerMap({
             maxZoom: 20,
           }
         ).addTo(lMap);
+
+        lMap.on('click', () => {
+          setSelectedPlaceId(null);
+        });
 
         leafletMapInstanceRef.current = lMap;
       }
@@ -694,32 +698,39 @@ export function RouteVisualizerMap({
           className="w-full h-full z-0"
         />
 
-        {/* Selected Place Overlay Card */}
+        {/* Selected Place Overlay Card (only shown when user taps a marker; easily dismissible via X or tapping map) */}
         {selectedPlace && (
-          <div className="absolute bottom-3 left-3 right-3 z-[1000] rounded-2xl border-2 border-amber-500/70 bg-stone-950/95 p-4 text-stone-100 shadow-2xl space-y-3 backdrop-blur-md">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="text-xs sm:text-sm text-amber-400 font-extrabold">
+          <div className="absolute bottom-2.5 left-2.5 right-2.5 z-[1000] rounded-2xl border-2 border-amber-500/80 bg-stone-950/95 p-3 sm:p-3.5 text-stone-100 shadow-2xl space-y-2 backdrop-blur-md">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <span className="text-xs text-amber-400 font-extrabold block">
                   📍 {selectedPlace.city}・{selectedPlace.district} ｜ ★{' '}
                   {selectedPlace.rating || 4.5}
                 </span>
-                <h4 className="text-base sm:text-lg font-black text-white">
+                <h4 className="text-sm sm:text-base font-black text-white truncate">
                   {selectedPlace.name}
                 </h4>
-                <p className="text-stone-300 text-xs sm:text-sm line-clamp-1">
-                  📝 {selectedPlace.user_notes || '無備註'}
-                </p>
+                {selectedPlace.user_notes && (
+                  <p className="text-stone-300 text-xs line-clamp-1">
+                    📝 {selectedPlace.user_notes}
+                  </p>
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedPlaceId(null)}
-                className="text-stone-400 hover:text-white p-1 text-base cursor-pointer"
+                aria-label="關閉地點卡片"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedPlaceId(null);
+                  googleInfoWindowRef.current?.close();
+                }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-stone-800 text-stone-200 hover:bg-stone-700 hover:text-white text-sm font-black cursor-pointer shrink-0 border border-stone-600"
               >
                 ✕
               </button>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1 border-t border-stone-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-stone-800">
               <select
                 value={selectedPlace.sub_category}
                 onChange={(e) => {
@@ -734,7 +745,7 @@ export function RouteVisualizerMap({
                     });
                   }
                 }}
-                className="rounded-xl bg-stone-800 border border-stone-700 px-3 py-1.5 text-xs sm:text-sm font-bold text-white focus:outline-none"
+                className="rounded-xl bg-stone-800 border border-stone-700 px-2.5 py-1 text-xs font-bold text-white focus:outline-none"
               >
                 {categoryConfigs.map((cfg) => (
                   <option key={cfg.id} value={cfg.sub_category}>
@@ -743,7 +754,7 @@ export function RouteVisualizerMap({
                 ))}
               </select>
 
-              <div className="flex gap-1.5">
+              <div className="flex gap-1">
                 {(
                   [
                     { key: 'unvisited', label: '🌟 想去' },
@@ -759,7 +770,7 @@ export function RouteVisualizerMap({
                         visit_status: st.key,
                       })
                     }
-                    className={`rounded-xl px-2.5 py-1.5 text-xs sm:text-sm font-extrabold cursor-pointer transition-colors ${
+                    className={`rounded-xl px-2 py-1 text-xs font-extrabold cursor-pointer transition-colors ${
                       selectedPlace.visit_status === st.key
                         ? 'bg-amber-600 text-white shadow-xs'
                         : 'bg-stone-800 text-stone-300 hover:text-white'
