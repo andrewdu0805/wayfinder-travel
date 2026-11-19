@@ -18,6 +18,12 @@ import {
   X,
 } from 'lucide-react';
 import { SavedPlace, CategoryConfig } from '@/types/place';
+import {
+  ALL_TAIWAN_CITY_DISTRICTS,
+  ALL_TAIWAN_CITIES,
+  getCoordinatesForRegion,
+} from '@/lib/geo-utils';
+import { resolvePlaceDescription } from '@/lib/place-notes';
 
 export function exportExcelCompatibleCsv(
   placesToExport: SavedPlace[],
@@ -97,7 +103,7 @@ export function ImportPreviewModal({
   const filteredPlaces = useMemo(() => {
     return places.filter((p) => {
       if (filterCity !== 'ALL' && p.city !== filterCity) return false;
-      if (filterCat !== 'ALL' && p.primary_category !== filterCat) return false;
+      if (filterCat !== 'ALL' && p.sub_category !== filterCat) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         const matchName = p.name.toLowerCase().includes(q);
@@ -162,19 +168,56 @@ export function ImportPreviewModal({
     setEditingId(null);
   };
 
-  const updatePlaceCategory = (id: string, primaryCat: string) => {
-    const matchCfg = categoryConfigs.find(
-      (c) => c.primary_category === primaryCat
+  const updatePlaceCityAndDistrict = (
+    id: string,
+    newCity: string,
+    newDistrict: string
+  ) => {
+    setPlaces((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const newCoords = getCoordinatesForRegion(newCity, newDistrict, p.name);
+        const freshNotes = resolvePlaceDescription(
+          p.name,
+          newCity,
+          newDistrict,
+          p.sub_category,
+          p.formatted_address
+        );
+        let nextAddr = p.formatted_address || '';
+        if (!nextAddr || !/[0-9]+號/.test(nextAddr)) {
+          nextAddr = `台灣${newCity}${newDistrict}`;
+        }
+        return {
+          ...p,
+          city: newCity,
+          district: newDistrict,
+          latitude: newCoords.lat,
+          longitude: newCoords.lng,
+          formatted_address: nextAddr,
+          user_notes:
+            p.user_notes &&
+            p.user_notes !== '由 CSV 清單匯入' &&
+            p.user_notes !== '由 Google Takeout 匯入' &&
+            !p.user_notes.includes('Google Maps 在地')
+              ? p.user_notes
+              : freshNotes,
+        };
+      })
     );
+  };
+
+  const updatePlaceCategory = (id: string, subCategory: string) => {
+    const cfg = categoryConfigs.find((c) => c.sub_category === subCategory);
+    if (!cfg) return;
     setPlaces((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
         return {
           ...p,
-          primary_category: primaryCat,
-          sub_category: matchCfg?.sub_category || p.sub_category,
-          estimated_stay_mins:
-            matchCfg?.default_stay_mins || p.estimated_stay_mins,
+          primary_category: cfg.primary_category,
+          sub_category: cfg.sub_category,
+          estimated_stay_mins: cfg.default_stay_mins,
         };
       })
     );
@@ -313,11 +356,11 @@ export function ImportPreviewModal({
               className="rounded-xl border border-stone-300 bg-stone-50 px-2.5 py-1.5 text-xs sm:text-sm font-bold text-stone-700 focus:bg-white focus:outline-none cursor-pointer"
             >
               <option value="ALL">全部分類</option>
-              <option value="restaurant">🍽️ 正餐/小吃</option>
-              <option value="cafe">☕ 咖啡/甜點</option>
-              <option value="spot">🏛️ 景點/散步</option>
-              <option value="shopping">🛍️ 購物/逛街</option>
-              <option value="bar">🍸 酒吧/居酒屋</option>
+              {categoryConfigs.map((cfg) => (
+                <option key={cfg.id} value={cfg.sub_category}>
+                  🏷️ {cfg.sub_label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -410,29 +453,88 @@ export function ImportPreviewModal({
                       </div>
                     )}
 
-                    {/* Tags: City, District, Category */}
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                      {/* Region Badge */}
-                      <span className="inline-flex items-center gap-1 rounded-md bg-amber-100/70 px-2 py-0.5 font-bold text-amber-900">
-                        <MapPin className="h-3 w-3 text-amber-700 shrink-0" />
-                        <span>
-                          {p.city}・{p.district}
-                        </span>
-                      </span>
+                    {/* Tags: City & District Dropdowns, Category Dropdown */}
+                    <div className="flex flex-wrap items-center gap-2 text-xs pt-0.5">
+                      {/* Region Selector (City & District) */}
+                      <div className="inline-flex items-center gap-1 bg-amber-50/90 border border-amber-300/80 rounded-lg px-2 py-0.5 shadow-2xs">
+                        <MapPin className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+                        {/* City Select */}
+                        <select
+                          aria-label={`${p.name} 選擇縣市`}
+                          value={p.city}
+                          onChange={(e) => {
+                            const newCity = e.target.value;
+                            const availableDistricts =
+                              ALL_TAIWAN_CITY_DISTRICTS[newCity] || [];
+                            const firstDist = availableDistricts[0] || '';
+                            updatePlaceCityAndDistrict(p.id, newCity, firstDist);
+                          }}
+                          className="bg-transparent text-xs font-black text-amber-950 focus:outline-none cursor-pointer pr-1"
+                          title="點擊更換縣市"
+                        >
+                          {ALL_TAIWAN_CITIES.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                          {!ALL_TAIWAN_CITIES.includes(p.city) && (
+                            <option value={p.city}>{p.city}</option>
+                          )}
+                        </select>
 
-                      {/* Category Selector Badge */}
+                        <span className="text-amber-400 font-bold">・</span>
+
+                        {/* District Select */}
+                        <select
+                          aria-label={`${p.name} 選擇行政區`}
+                          value={p.district}
+                          onChange={(e) => {
+                            updatePlaceCityAndDistrict(
+                              p.id,
+                              p.city,
+                              e.target.value
+                            );
+                          }}
+                          className="bg-transparent text-xs font-black text-amber-950 focus:outline-none cursor-pointer pr-1"
+                          title="點擊更換行政區"
+                        >
+                          {(
+                            ALL_TAIWAN_CITY_DISTRICTS[p.city] || [p.district]
+                          ).map((d) => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                          {!(
+                            ALL_TAIWAN_CITY_DISTRICTS[p.city] || []
+                          ).includes(p.district) && (
+                            <option value={p.district}>{p.district}</option>
+                          )}
+                        </select>
+                      </div>
+
+                      {/* Category Selector Badge (100% Identical to PlaceCard after import!) */}
                       <select
-                        value={p.primary_category}
+                        aria-label={`${p.name} 分類切換`}
+                        value={p.sub_category}
                         onChange={(e) =>
                           updatePlaceCategory(p.id, e.target.value)
                         }
-                        className="rounded-md border border-stone-200 bg-white px-1.5 py-0.5 text-xs font-bold text-stone-700 hover:border-amber-400 cursor-pointer"
+                        className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-black text-amber-950 hover:bg-amber-100 focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer shadow-2xs"
+                        title="點擊更換分類（與景點卡片選項完全一致）"
                       >
-                        <option value="restaurant">🍽️ 正餐小吃</option>
-                        <option value="cafe">☕ 咖啡甜點</option>
-                        <option value="spot">🏛️ 景點散步</option>
-                        <option value="shopping">🛍️ 購物商圈</option>
-                        <option value="bar">🍸 暢飲酒吧</option>
+                        {categoryConfigs.map((cfg) => (
+                          <option key={cfg.id} value={cfg.sub_category}>
+                            🏷️ {cfg.sub_label}
+                          </option>
+                        ))}
+                        {!categoryConfigs.some(
+                          (c) => c.sub_category === p.sub_category
+                        ) && (
+                          <option value={p.sub_category}>
+                            🏷️ {p.sub_category}
+                          </option>
+                        )}
                       </select>
 
                       {/* User Notes / Google Maps Highlights */}

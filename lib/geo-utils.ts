@@ -1124,6 +1124,36 @@ export const TAIWAN_ZIP_TO_REGION: Record<
   '981': { city: '花蓮縣', district: '玉里鎮' },
 };
 
+/**
+ * Complete City -> Districts mapping for all 22 cities and counties of Taiwan,
+ * dynamically synthesized from official 3-digit postal code gazetteer + popular Japan cities.
+ */
+export const ALL_TAIWAN_CITY_DISTRICTS: Record<string, string[]> = {};
+for (const info of Object.values(TAIWAN_ZIP_TO_REGION)) {
+  if (!ALL_TAIWAN_CITY_DISTRICTS[info.city]) {
+    ALL_TAIWAN_CITY_DISTRICTS[info.city] = [];
+  }
+  if (!ALL_TAIWAN_CITY_DISTRICTS[info.city].includes(info.district)) {
+    ALL_TAIWAN_CITY_DISTRICTS[info.city].push(info.district);
+  }
+}
+// Popular Japan Cities
+ALL_TAIWAN_CITY_DISTRICTS['東京都'] = [
+  '台東區', '千代田區', '新宿區', '澀谷區', '港區', '中央區', '墨田區', '文京區', '豐島區',
+];
+ALL_TAIWAN_CITY_DISTRICTS['京都府'] = [
+  '中京區', '下京區', '東山區', '左京區', '右京區', '北區', '上京區',
+];
+ALL_TAIWAN_CITY_DISTRICTS['大阪府'] = [
+  '中央區', '北區', '浪速區', '西區', '天王寺區', '福島區',
+];
+
+export function getDistrictsForCity(city: string): string[] {
+  return ALL_TAIWAN_CITY_DISTRICTS[city] || [];
+}
+
+export const ALL_TAIWAN_CITIES: string[] = Object.keys(ALL_TAIWAN_CITY_DISTRICTS);
+
 export const DISTRICT_CENTROIDS: Array<{
   city: string;
   district: string;

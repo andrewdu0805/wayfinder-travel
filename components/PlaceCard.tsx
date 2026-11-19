@@ -11,93 +11,14 @@ import {
   Trash2,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
-import { getCoordinatesForRegion } from '@/lib/geo-utils';
+import {
+  getCoordinatesForRegion,
+  ALL_TAIWAN_CITY_DISTRICTS,
+} from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
 import { BusinessStatus, SavedPlace, VisitStatus } from '@/types/place';
 
-const CITY_DISTRICTS_MAP: Record<string, string[]> = {
-  台南市: [
-    '中西區',
-    '南區',
-    '東區',
-    '北區',
-    '安平區',
-    '安南區',
-    '永康區',
-    '仁德區',
-    '歸仁區',
-    '新化區',
-    '善化區',
-    '新市區',
-    '安定區',
-    '麻豆區',
-    '佳里區',
-    '西港區',
-    '七股區',
-    '關廟區',
-    '玉井區',
-    '白河區',
-    '新營區',
-    '鹽水區',
-  ],
-  台北市: [
-    '大安區',
-    '中正區',
-    '中山區',
-    '大同區',
-    '松山區',
-    '萬華區',
-    '信義區',
-    '士林區',
-    '北投區',
-    '內湖區',
-    '南港區',
-    '文山區',
-  ],
-  新北市: [
-    '板橋區',
-    '三重區',
-    '中和區',
-    '永和區',
-    '新莊區',
-    '新店區',
-    '土城區',
-    '蘆洲區',
-    '汐止區',
-    '淡水區',
-    '林口區',
-    '三峽區',
-    '鶯歌區',
-    '樹林區',
-  ],
-  高雄市: [
-    '鹽埕區',
-    '鼓山區',
-    '左營區',
-    '前金區',
-    '新興區',
-    '苓雅區',
-    '三民區',
-    '前鎮區',
-    '旗津區',
-    '楠梓區',
-    '小港區',
-    '鳳山區',
-  ],
-  台中市: [
-    '中區',
-    '西區',
-    '北區',
-    '南區',
-    '東區',
-    '西屯區',
-    '南屯區',
-    '北屯區',
-    '豐原區',
-    '大雅區',
-    '沙鹿區',
-  ],
-};
+const CITY_DISTRICTS_MAP = ALL_TAIWAN_CITY_DISTRICTS;
 
 interface PlaceCardProps {
   place: SavedPlace;
