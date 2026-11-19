@@ -109,10 +109,12 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   }
 
   // 2. Check if formatted_address is just a generic city/district placeholder without any street/road/number
+  const hasSpecificHouseNumber = /[0-9]+號/.test(nextAddr);
   const isPlaceholderAddr =
     !nextAddr ||
     nextAddr === '台灣高雄市鹽埕區' ||
-    !/[路街段巷弄號大道村里丁目番地]/.test(nextAddr);
+    !/[路街段巷弄號大道村里丁目番地]/.test(nextAddr) ||
+    (!hasSpecificHouseNumber && (nextAddr.includes('永康區') || nextAddr.includes('鹽埕區')));
 
   if (sep.foundAddress && sep.cleanName && sep.cleanName !== p.name) {
     nextName = sep.cleanName;
@@ -179,16 +181,44 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     nextAddr = nextAddr.replace('市中心', nextDist);
   }
 
-  // 4. Coordinate self-healing: if coordinates came from an old synthetic district centroid that doesn't match the true district
-  if (!urlCoords) {
-    if (
-      nextName.includes('酣呷') ||
-      nextName.includes('The Han Jia') ||
-      nextName.includes('The Han-Jia')
-    ) {
-      nextLat = 22.9868;
-      nextLng = 120.1979;
-    } else if (nextCity === '台南市' && nextDist === '南區' && nextLat > 23.00) {
+  // 4. Critical Hotspot Self-Healing: explicitly repair known hotspots that were erroneously assigned to the wrong district or coordinates
+  if (
+    nextName.includes('酣呷') ||
+    nextName.includes('The Han Jia') ||
+    nextName.includes('The Han-Jia')
+  ) {
+    nextCity = '台南市';
+    nextDist = '南區';
+    nextLat = 22.9868;
+    nextLng = 120.1979;
+    nextAddr = '702臺南市南區新昌里西門路一段669號';
+  } else if (
+    nextName.includes('下林米糕') ||
+    (nextName.includes('下林') && nextCity === '台南市')
+  ) {
+    nextCity = '台南市';
+    nextDist = '南區';
+    nextLat = 22.9842;
+    nextLng = 120.1956;
+    if (isPlaceholderAddr || !hasSpecificHouseNumber) {
+      nextAddr = '702臺南市南區夏林路67號';
+    }
+  } else if (
+    nextCity === '台南市' &&
+    nextDist === '永康區' &&
+    (nextName.includes('西門路') ||
+      nextName.includes('新昌里') ||
+      nextName.includes('夏林路') ||
+      nextName.includes('水交社') ||
+      nextName.includes('阿銘牛肉麵'))
+  ) {
+    nextCity = '台南市';
+    nextDist = '南區';
+    const newCoords = getCoordinatesForRegion(nextCity, nextDist, nextName);
+    nextLat = newCoords.lat;
+    nextLng = newCoords.lng;
+  } else if (!urlCoords) {
+    if (nextCity === '台南市' && nextDist === '南區' && nextLat > 23.00) {
       const newCoords = getCoordinatesForRegion(nextCity, nextDist, nextName);
       nextLat = newCoords.lat;
       nextLng = newCoords.lng;

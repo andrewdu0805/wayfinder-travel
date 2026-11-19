@@ -10,7 +10,92 @@ import {
   Trash2,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
+import { getCoordinatesForRegion } from '@/lib/geo-utils';
 import { BusinessStatus, SavedPlace, VisitStatus } from '@/types/place';
+
+const CITY_DISTRICTS_MAP: Record<string, string[]> = {
+  台南市: [
+    '中西區',
+    '南區',
+    '東區',
+    '北區',
+    '安平區',
+    '安南區',
+    '永康區',
+    '仁德區',
+    '歸仁區',
+    '新化區',
+    '善化區',
+    '新市區',
+    '安定區',
+    '麻豆區',
+    '佳里區',
+    '西港區',
+    '七股區',
+    '關廟區',
+    '玉井區',
+    '白河區',
+    '新營區',
+    '鹽水區',
+  ],
+  台北市: [
+    '大安區',
+    '中正區',
+    '中山區',
+    '大同區',
+    '松山區',
+    '萬華區',
+    '信義區',
+    '士林區',
+    '北投區',
+    '內湖區',
+    '南港區',
+    '文山區',
+  ],
+  新北市: [
+    '板橋區',
+    '三重區',
+    '中和區',
+    '永和區',
+    '新莊區',
+    '新店區',
+    '土城區',
+    '蘆洲區',
+    '汐止區',
+    '淡水區',
+    '林口區',
+    '三峽區',
+    '鶯歌區',
+    '樹林區',
+  ],
+  高雄市: [
+    '鹽埕區',
+    '鼓山區',
+    '左營區',
+    '前金區',
+    '新興區',
+    '苓雅區',
+    '三民區',
+    '前鎮區',
+    '旗津區',
+    '楠梓區',
+    '小港區',
+    '鳳山區',
+  ],
+  台中市: [
+    '中區',
+    '西區',
+    '北區',
+    '南區',
+    '東區',
+    '西屯區',
+    '南屯區',
+    '北屯區',
+    '豐原區',
+    '大雅區',
+    '沙鹿區',
+  ],
+};
 
 interface PlaceCardProps {
   place: SavedPlace;
@@ -36,6 +121,11 @@ export function PlaceCard({ place }: PlaceCardProps) {
       ? `每日 ${place.opening_hours_json.daily_hours.open}–${place.opening_hours_json.daily_hours.close}`
       : '營業時間依現場公告');
 
+  const cityDistricts = CITY_DISTRICTS_MAP[place.city] || [];
+  const availableDistricts = cityDistricts.includes(place.district)
+    ? cityDistricts
+    : [place.district, ...cityDistricts];
+
   return (
     <>
       <article
@@ -47,12 +137,40 @@ export function PlaceCard({ place }: PlaceCardProps) {
         }`}
       >
         <div className="space-y-2.5">
-          {/* 第 1 排：地區 ＋ 地圖按鈕（左右對齊） */}
+          {/* 第 1 排：地區選單 ＋ 地圖按鈕（左右對齊） */}
           <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex items-center gap-1 rounded-xl bg-stone-100 px-2.5 py-1 text-xs sm:text-sm font-extrabold text-stone-700 shrink-0">
-              <MapPin className="h-3.5 w-3.5 text-amber-700 shrink-0" />
-              {place.city}・{place.district}
-            </span>
+            {/* 行政區切換下拉選單 */}
+            <div className="relative inline-flex items-center max-w-[200px] sm:max-w-xs">
+              <MapPin className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-amber-700 shrink-0" />
+              <select
+                aria-label={`${place.name} 行政區切換`}
+                value={place.district}
+                onChange={(e) => {
+                  const nextDist = e.target.value;
+                  const newCoords = getCoordinatesForRegion(
+                    place.city,
+                    nextDist,
+                    place.name
+                  );
+                  updatePlaceInline(place.id, {
+                    district: nextDist,
+                    latitude: newCoords.lat,
+                    longitude: newCoords.lng,
+                  });
+                }}
+                className="appearance-none rounded-xl border border-stone-200 bg-stone-100 pl-6.5 pr-6 py-1 text-xs sm:text-sm font-extrabold text-stone-800 hover:bg-stone-200 hover:border-stone-300 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer transition-colors truncate"
+                title="點擊可手動修正或更換行政區"
+              >
+                {availableDistricts.map((d) => (
+                  <option key={d} value={d}>
+                    📍 {place.city}・{d}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-2 text-[10px] text-stone-500">
+                ▼
+              </span>
+            </div>
 
             {/* 地圖按鈕：直接放在地區同列右側 */}
             <a

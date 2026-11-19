@@ -1430,12 +1430,13 @@ export function extractRegionFromAddress(
     }
   }
 
-  // 6. Match from known landmark/village/road hints (e.g. 永華里 / 湯德章大道 / 金華路四段 -> 台南市・中西區)
-  if (!district) {
+  // 6. Match from known landmark/village/road hints (e.g. 永華里 / 湯德章大道 / 金華路四段 -> 台南市・中西區, 酣呷 -> 台南市・南區)
+  const isWeakDistrict = !district || !/[0-9]+號/.test(clean);
+  if (isWeakDistrict) {
     for (const rule of LANDMARK_OR_ROAD_TO_DISTRICT) {
       if (rule.keywords.some((kw) => clean.includes(kw))) {
-        if (!cityRaw) cityRaw = rule.city;
-        if (cityRaw === rule.city) {
+        if (!cityRaw || cityRaw === rule.city) {
+          cityRaw = rule.city;
           district = rule.district;
           break;
         }
