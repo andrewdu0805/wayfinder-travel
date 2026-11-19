@@ -311,10 +311,25 @@ export async function POST(req: NextRequest) {
         const itemTitle = String(item.title || '').trim();
         const itemNote = String(item.note || '').trim();
 
-        // 1. Check BUILTIN_GAZETTEER
+        // 1. If Google Maps URL or row coordinates exist, URL is the SUPREME AUTHORITY:
+        if (itemUrl || item.rowCoords) {
+          const resolved = resolvePlaceFromGoogleMapsUrl({
+            url: itemUrl,
+            fallbackTitle: itemTitle,
+            userNote: itemNote,
+            defaultCity,
+            categoryConfigs,
+            customTags: ['#GoogleMaps匯入'],
+            rowCoords: item.rowCoords || null,
+          });
+          parsedBatch.push(resolved);
+          continue;
+        }
+
+        // 2. Fallback to BUILTIN_GAZETTEER only if no URL was provided in the CSV row:
         const matchedTpl = BUILTIN_GAZETTEER.find((tpl) =>
           tpl.keywords.some((kw) =>
-            (itemTitle + ' ' + itemUrl).toLowerCase().includes(kw.toLowerCase())
+            itemTitle.toLowerCase().includes(kw.toLowerCase())
           )
         );
 
@@ -348,7 +363,6 @@ export async function POST(req: NextRequest) {
               daily_hours: matchedTpl.daily_hours,
             },
             google_maps_url:
-              itemUrl ||
               `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
                 `${matchedTpl.name} ${region.city}`
               )}`,
@@ -371,17 +385,16 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // 2. Primary Authority: Resolve Place from Google Maps URL
+        // 3. Fallback resolution if row had title but no URL and no gazetteer match
         const resolved = resolvePlaceFromGoogleMapsUrl({
-          url: itemUrl,
+          url: '',
           fallbackTitle: itemTitle,
           userNote: itemNote,
           defaultCity,
           categoryConfigs,
           customTags: ['#GoogleMaps匯入'],
-          rowCoords: item.rowCoords || null,
+          rowCoords: null,
         });
-
         parsedBatch.push(resolved);
       }
 
@@ -403,12 +416,13 @@ export async function POST(req: NextRequest) {
     let urlDetectedAddress: string | undefined;
     let urlDetectedCoords: { lat: number; lng: number } | undefined =
       extractCoordsFromGoogleMapsUrl(rawInput) || undefined;
+    let expandedUrl = '';
 
     // Step 1: Detect Google Maps short URLs or desktop URLs and extract destination metadata
     const urlMatch = rawInput.match(/https?:\/\/[^\s)]+/i);
     if (urlMatch) {
       const targetUrl = urlMatch[0];
-      // Only fetch URL over network if it's a short link (maps.app.goo.gl / goo.gl) or we don't have coordinates yet
+      expandedUrl = targetUrl;
       const isShortUrl = /goo\.gl|maps\.app/i.test(targetUrl);
       if (isShortUrl || !urlDetectedCoords) {
         try {
@@ -424,6 +438,7 @@ export async function POST(req: NextRequest) {
           });
 
           const finalUrl = res.url || targetUrl;
+          expandedUrl = finalUrl;
           const decodedUrl = decodeURIComponent(finalUrl);
           resolvedInput = `${rawInput} [展開網址: ${decodedUrl}]`;
 
@@ -432,82 +447,163 @@ export async function POST(req: NextRequest) {
             urlDetectedCoords = extractedFromFinal;
           }
 
-        // 1. Parse HTML title tag (e.g. <title>阿蓮牛肉湯 - Google 地圖</title>)
-        const html = await res.text();
-        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-        if (titleMatch) {
-          const cleanTitle = titleMatch[1]
-            .replace(/\s*[-–—|·]\s*(Google\s*(Maps|地圖)|Google).*$/i, '')
-            .trim();
+          // 1. Parse HTML title tag (e.g. <title>阿蓮牛肉湯 - Google 地圖</title>)
+          const html = await res.text();
+          const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+          if (titleMatch) {
+            const cleanTitle = titleMatch[1]
+              .replace(/\s*[-–—|·]\s*(Google\s*(Maps|地圖)|Google).*$/i, '')
+              .trim();
+            if (
+              cleanTitle &&
+              !cleanTitle.includes('Google 地圖') &&
+              !cleanTitle.includes('Google Maps')
+            ) {
+              const sepTitle = separateNameAndAddress(cleanTitle);
+              if (sepTitle.cleanName) urlDetectedName = sepTitle.cleanName;
+              if (sepTitle.foundAddress) urlDetectedAddress = sepTitle.foundAddress;
+            }
+          }
+
+          // 2. Parse HTML OpenGraph metadata
+          const ogTitleMatch =
+            html.match(
+              /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i
+            ) ||
+            html.match(
+              /<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i
+            );
           if (
-            cleanTitle &&
-            !cleanTitle.includes('Google 地圖') &&
-            !cleanTitle.includes('Google Maps')
+            ogTitleMatch &&
+            ogTitleMatch[1] &&
+            !ogTitleMatch[1].includes('Google Maps') &&
+            !ogTitleMatch[1].includes('Google 地圖')
           ) {
-            const sepTitle = separateNameAndAddress(cleanTitle);
-            if (sepTitle.cleanName) urlDetectedName = sepTitle.cleanName;
-            if (sepTitle.foundAddress) urlDetectedAddress = sepTitle.foundAddress;
-          }
-        }
-
-        // 2. Parse HTML OpenGraph metadata
-        const ogTitleMatch =
-          html.match(
-            /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i
-          ) ||
-          html.match(
-            /<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i
-          );
-        if (
-          ogTitleMatch &&
-          ogTitleMatch[1] &&
-          !ogTitleMatch[1].includes('Google Maps') &&
-          !ogTitleMatch[1].includes('Google 地圖')
-        ) {
-          const parts = ogTitleMatch[1].split(/·|-/).map((s) => s.trim());
-          if (parts[0]) {
-            const sep0 = separateNameAndAddress(parts[0]);
-            if (sep0.cleanName) urlDetectedName = sep0.cleanName;
-            if (sep0.foundAddress && !urlDetectedAddress) {
-              urlDetectedAddress = sep0.foundAddress;
+            const parts = ogTitleMatch[1].split(/·|-/).map((s) => s.trim());
+            if (parts[0]) {
+              const sep0 = separateNameAndAddress(parts[0]);
+              if (sep0.cleanName) urlDetectedName = sep0.cleanName;
+              if (sep0.foundAddress && !urlDetectedAddress) {
+                urlDetectedAddress = sep0.foundAddress;
+              }
+            }
+            if (parts[1]) {
+              const sep1 = separateNameAndAddress(parts[1]);
+              if (sep1.foundAddress) {
+                urlDetectedAddress = sep1.foundAddress;
+              } else if (!urlDetectedAddress) {
+                urlDetectedAddress = parts[1];
+              }
             }
           }
-          if (parts[1]) {
-            const sep1 = separateNameAndAddress(parts[1]);
-            if (sep1.foundAddress) {
-              urlDetectedAddress = sep1.foundAddress;
-            } else if (!urlDetectedAddress) {
-              urlDetectedAddress = parts[1];
+
+          // 3. Check /place/<PlaceName>, /search/<Query>, or ?q=<Query> in URL
+          const placeMatch =
+            decodedUrl.match(/\/(?:place|search)\/([^/@?]+)/) ||
+            decodedUrl.match(/[?&]q=([^&]+)/);
+          if (placeMatch) {
+            const placeRaw = placeMatch[1].replace(/\+/g, ' ').trim();
+            const sepPlace = separateNameAndAddress(placeRaw);
+            if (sepPlace.foundAddress && !urlDetectedAddress) {
+              urlDetectedAddress = sepPlace.foundAddress;
+            }
+            if (sepPlace.cleanName && !urlDetectedName) {
+              urlDetectedName = sepPlace.cleanName;
+            } else if (!urlDetectedName && !sepPlace.foundAddress) {
+              urlDetectedName = placeRaw;
             }
           }
-        }
 
-        // 3. Check /place/<PlaceName>, /search/<Query>, or ?q=<Query> in URL
-        const placeMatch =
-          decodedUrl.match(/\/(?:place|search)\/([^/@?]+)/) ||
-          decodedUrl.match(/[?&]q=([^&]+)/);
-        if (placeMatch) {
-          const placeRaw = placeMatch[1].replace(/\+/g, ' ').trim();
-          const sepPlace = separateNameAndAddress(placeRaw);
-          if (sepPlace.foundAddress && !urlDetectedAddress) {
-            urlDetectedAddress = sepPlace.foundAddress;
+          if (urlDetectedName || urlDetectedAddress) {
+            resolvedInput = `${rawInput}\n[展開網址: ${decodedUrl}]\n[系統預先分離純店名: ${
+              urlDetectedName || ''
+            }]\n[系統預先分離地址: ${urlDetectedAddress || ''}]`;
           }
-          if (sepPlace.cleanName && !urlDetectedName) {
-            urlDetectedName = sepPlace.cleanName;
-          } else if (!urlDetectedName && !sepPlace.foundAddress) {
-            urlDetectedName = placeRaw;
-          }
-        }
-
-        if (urlDetectedName || urlDetectedAddress) {
-          resolvedInput = `${rawInput}\n[展開網址: ${decodedUrl}]\n[系統預先分離純店名: ${
-            urlDetectedName || ''
-          }]\n[系統預先分離地址: ${urlDetectedAddress || ''}]`;
-        }
         } catch {
           // Fall back to text parsing if network request is blocked or times out
         }
       }
+    }
+
+    // Step 1.5: Single Google Maps URL Paste Authority (100% Identical to CSV import!)
+    // If the input contains a Google Maps link, the link's coordinates & location are the supreme truth.
+    if (urlMatch && /maps|goo\.gl/i.test(urlMatch[0])) {
+      const gmapsUrl = expandedUrl || urlMatch[0];
+      const userNoteFromInput = rawInput
+        .replace(/https?:\/\/[^\s)]+/gi, '')
+        .trim();
+
+      const resolved = resolvePlaceFromGoogleMapsUrl({
+        url: gmapsUrl,
+        fallbackTitle: urlDetectedName || '',
+        userNote: userNoteFromInput,
+        defaultCity,
+        categoryConfigs,
+        customTags: ['#GoogleMaps匯入', ...extractCustomTags(rawInput)],
+        rowCoords: urlDetectedCoords || null,
+      });
+
+      // Optional: Enrich opening hours and rating via Google Places API without modifying coordinates/region
+      if (googleMapsApiKey && googleMapsApiKey !== 'your-google-maps-api-key') {
+        try {
+          const searchQuery = `${resolved.name} ${resolved.city}${resolved.district}`;
+          const placesRes = await fetch(
+            'https://places.googleapis.com/v1/places:searchText',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': googleMapsApiKey,
+                'X-Goog-FieldMask':
+                  'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.editorialSummary',
+              },
+              body: JSON.stringify({
+                textQuery: searchQuery,
+                languageCode: 'zh-TW',
+                locationBias: {
+                  circle: {
+                    center: {
+                      latitude: resolved.latitude,
+                      longitude: resolved.longitude,
+                    },
+                    radius: 1500.0,
+                  },
+                },
+              }),
+            }
+          );
+          if (placesRes.ok) {
+            const data = await placesRes.json();
+            const top = data.places?.[0];
+            if (top) {
+              const distKm = Math.hypot(
+                (top.location.latitude - resolved.latitude) * 111,
+                (top.location.longitude - resolved.longitude) * 102
+              );
+              if (distKm <= 2.5) {
+                if (top.rating) resolved.rating = top.rating;
+                if (top.regularOpeningHours?.weekdayDescriptions) {
+                  resolved.opening_hours_json = {
+                    open_now: true,
+                    weekday_descriptions: top.regularOpeningHours.weekdayDescriptions,
+                  };
+                }
+                if (top.formattedAddress && !resolved.formatted_address.includes('號')) {
+                  resolved.formatted_address = top.formattedAddress;
+                }
+                if (top.editorialSummary?.text && (!userNoteFromInput || userNoteFromInput === '由 CSV 清單匯入')) {
+                  resolved.user_notes = top.editorialSummary.text;
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+
+      return NextResponse.json({
+        places: [resolved],
+        mode: 'url_primary_resolver',
+      });
     }
 
     const nowIso = new Date().toISOString();

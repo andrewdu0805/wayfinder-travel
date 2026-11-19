@@ -1130,9 +1130,9 @@ export const DISTRICT_CENTROIDS: Array<{
   lat: number;
   lng: number;
 }> = [
-  // 台南市 (dense sub-centroids for urban core + all major districts)
+  // 台南市 (所有37行政區全數精準覆蓋 + 市中心密集子中心)
   { city: '台南市', district: '中西區', lat: 22.9935, lng: 120.1985 },
-  { city: '台南市', district: '中西區', lat: 22.9985, lng: 120.1925 }, // 兌悅里/金華路四段/神農街
+  { city: '台南市', district: '中西區', lat: 22.9985, lng: 120.1925 }, // 兌悅里/金華路四段/神農街/西市場
   { city: '台南市', district: '中西區', lat: 22.9895, lng: 120.2035 }, // 孔廟/府前路
   { city: '台南市', district: '北區', lat: 23.0055, lng: 120.2035 },   // 崇安街/鴨母寮/成功路北側
   { city: '台南市', district: '北區', lat: 23.0135, lng: 120.2065 },   // 花園夜市/海安路三段
@@ -1148,7 +1148,11 @@ export const DISTRICT_CENTROIDS: Array<{
   { city: '台南市', district: '永康區', lat: 23.0125, lng: 120.2335 }, // 中華路/南台科大/大橋
   { city: '台南市', district: '永康區', lat: 23.0285, lng: 120.2565 }, // 永康市區/大灣
   { city: '台南市', district: '安南區', lat: 23.047, lng: 120.185 },
-  { city: '台南市', district: '新化區', lat: 23.038, lng: 120.311 },
+  { city: '台南市', district: '新化區', lat: 23.038, lng: 120.311 }, // 新化老街/大智路/阿蓮牛肉湯
+  { city: '台南市', district: '左鎮區', lat: 23.058, lng: 120.362 }, // 化石園區/王家燻羊肉
+  { city: '台南市', district: '玉井區', lat: 23.124, lng: 120.461 },
+  { city: '台南市', district: '楠西區', lat: 23.173, lng: 120.485 },
+  { city: '台南市', district: '南化區', lat: 23.043, lng: 120.477 },
   { city: '台南市', district: '仁德區', lat: 22.942, lng: 120.242 },
   { city: '台南市', district: '歸仁區', lat: 22.925, lng: 120.286 },
   { city: '台南市', district: '關廟區', lat: 22.962, lng: 120.328 },
@@ -1156,21 +1160,25 @@ export const DISTRICT_CENTROIDS: Array<{
   { city: '台南市', district: '善化區', lat: 23.132, lng: 120.296 },
   { city: '台南市', district: '新市區', lat: 23.079, lng: 120.295 },
   { city: '台南市', district: '安定區', lat: 23.101, lng: 120.237 },
-  { city: '台南市', district: '麻豆區', lat: 23.182, lng: 120.248 },
+  { city: '台南市', district: '山上區', lat: 23.104, lng: 120.354 },
+  { city: '台南市', district: '大內區', lat: 23.120, lng: 120.350 },
+  { city: '台南市', district: '麻豆區', lat: 23.1873, lng: 120.2599 }, // 總爺藝文中心/麻豆市區
   { city: '台南市', district: '佳里區', lat: 23.165, lng: 120.177 },
+  { city: '台南市', district: '西港區', lat: 23.123, lng: 120.203 },
   { city: '台南市', district: '七股區', lat: 23.141, lng: 120.126 },
+  { city: '台南市', district: '將軍區', lat: 23.199, lng: 120.158 },
   { city: '台南市', district: '北門區', lat: 23.267, lng: 120.126 },
   { city: '台南市', district: '學甲區', lat: 23.232, lng: 120.181 },
+  { city: '台南市', district: '官田區', lat: 23.194, lng: 120.314 },
+  { city: '台南市', district: '六甲區', lat: 23.231, lng: 120.347 },
+  { city: '台南市', district: '下營區', lat: 23.235, lng: 120.264 },
+  { city: '台南市', district: '柳營區', lat: 23.278, lng: 120.312 },
   { city: '台南市', district: '鹽水區', lat: 23.319, lng: 120.266 },
   { city: '台南市', district: '新營區', lat: 23.31, lng: 120.316 },
   { city: '台南市', district: '後壁區', lat: 23.366, lng: 120.362 },
   { city: '台南市', district: '白河區', lat: 23.351, lng: 120.415 },
   { city: '台南市', district: '東山區', lat: 23.326, lng: 120.404 },
-  { city: '台南市', district: '六甲區', lat: 23.231, lng: 120.347 },
-  { city: '台南市', district: '官田區', lat: 23.194, lng: 120.314 },
-  { city: '台南市', district: '玉井區', lat: 23.124, lng: 120.461 },
-  { city: '台南市', district: '楠西區', lat: 23.173, lng: 120.485 },
-  // 高雄市
+  // 高雄市 (38行政區全數覆蓋)
   { city: '高雄市', district: '鹽埕區', lat: 22.624, lng: 120.284 },
   { city: '高雄市', district: '鼓山區', lat: 22.632, lng: 120.273 }, // 哈瑪星/西子灣
   { city: '高雄市', district: '鼓山區', lat: 22.661, lng: 120.291 }, // 美術館/瑞豐
@@ -1184,9 +1192,32 @@ export const DISTRICT_CENTROIDS: Array<{
   { city: '高雄市', district: '三民區', lat: 22.648, lng: 120.322 },
   { city: '高雄市', district: '鳳山區', lat: 22.627, lng: 120.357 },
   { city: '高雄市', district: '小港區', lat: 22.565, lng: 120.354 },
+  { city: '高雄市', district: '仁武區', lat: 22.701, lng: 120.348 },
+  { city: '高雄市', district: '大社區', lat: 22.730, lng: 120.347 },
+  { city: '高雄市', district: '鳥松區', lat: 22.659, lng: 120.364 },
+  { city: '高雄市', district: '大寮區', lat: 22.605, lng: 120.395 },
+  { city: '高雄市', district: '林園區', lat: 22.506, lng: 120.396 },
   { city: '高雄市', district: '岡山區', lat: 22.796, lng: 120.296 },
+  { city: '高雄市', district: '路竹區', lat: 22.856, lng: 120.261 },
+  { city: '高雄市', district: '阿蓮區', lat: 22.883, lng: 120.327 },
+  { city: '高雄市', district: '田寮區', lat: 22.876, lng: 120.360 },
+  { city: '高雄市', district: '燕巢區', lat: 22.793, lng: 120.362 },
+  { city: '高雄市', district: '橋頭區', lat: 22.757, lng: 120.305 },
+  { city: '高雄市', district: '梓官區', lat: 22.760, lng: 120.267 },
+  { city: '高雄市', district: '彌陀區', lat: 22.782, lng: 120.247 },
+  { city: '高雄市', district: '永安區', lat: 22.818, lng: 120.226 },
+  { city: '高雄市', district: '湖內區', lat: 22.908, lng: 120.215 },
+  { city: '高雄市', district: '茄萣區', lat: 22.906, lng: 120.183 },
+  { city: '高雄市', district: '大樹區', lat: 22.693, lng: 120.432 },
   { city: '高雄市', district: '旗山區', lat: 22.888, lng: 120.483 },
   { city: '高雄市', district: '美濃區', lat: 22.899, lng: 120.541 },
+  { city: '高雄市', district: '六龜區', lat: 22.997, lng: 120.634 },
+  { city: '高雄市', district: '內門區', lat: 22.943, lng: 120.462 },
+  { city: '高雄市', district: '杉林區', lat: 22.971, lng: 120.539 },
+  { city: '高雄市', district: '甲仙區', lat: 23.082, lng: 120.591 },
+  { city: '高雄市', district: '桃源區', lat: 23.161, lng: 120.761 },
+  { city: '高雄市', district: '那瑪夏區', lat: 23.238, lng: 120.697 },
+  { city: '高雄市', district: '茂林區', lat: 22.887, lng: 120.665 },
   // 台北市 (12區 dense sub-centroids)
   { city: '台北市', district: '大同區', lat: 25.056, lng: 121.511 }, // 大稻埕/迪化街
   { city: '台北市', district: '大同區', lat: 25.068, lng: 121.516 }, // 圓山/大龍峒
@@ -1414,9 +1445,75 @@ export function extractRegionFromAddress(
   const urlCoords = extractCoordsFromGoogleMapsUrl(clean);
   const effectiveCoords = urlCoords || coords;
 
+  // 1. SUPREME AUTHORITY: If coordinates are available (from Google Maps URL or input),
+  // the location is physically anchored to these exact coordinates on Earth.
+  // URL coordinates MUST strictly determine city and district without arbitrary text heuristics!
+  if (
+    effectiveCoords &&
+    !isNaN(effectiveCoords.lat) &&
+    !isNaN(effectiveCoords.lng)
+  ) {
+    const { lat, lng } = effectiveCoords;
 
+    // 1a. Japan bounds check
+    if (lat >= 30.0 && lat <= 46.0 && lng >= 128.0 && lng <= 146.0) {
+      const cityMatch = clean.match(
+        /(東京都|大阪府|京都府|北海道|[^\s,]+?[都道府県])/
+      );
+      const distMatch = clean.match(/([^\s,都道府県]+?[区區市町村])/);
+      return {
+        country: '日本',
+        city: cityMatch ? cityMatch[1] : (lat > 35.5 && lng > 139.0 ? '東京都' : '大阪府'),
+        district: distMatch ? distMatch[1] : '台東區',
+      };
+    }
 
-  // 2. Japan detection
+    // 1b. Taiwan bounds check
+    if (lat >= 21.5 && lat <= 26.5 && lng >= 118.0 && lng <= 122.5) {
+      let nearestDist = '';
+      let nearestCity = '';
+      let minMeters = Infinity;
+
+      for (const c of DISTRICT_CENTROIDS) {
+        const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
+        if (d < minMeters) {
+          minMeters = d;
+          nearestCity = c.city;
+          nearestDist = c.district;
+        }
+      }
+
+      // Border fine-tuning: Only if the address contains an explicit 3-digit postal code
+      // (e.g. 700) or explicit district name with '區' in the EXACT SAME CITY, and the pin
+      // is within 3.5km of that district centroid, allow it to refine adjacent borders:
+      const zipMatch = clean.match(
+        /(?:^|\s|,)(\d{3})\d{0,3}\s*(?:台灣|臺灣|臺北市|台北市|新北市|桃園市|臺中市|台中市|臺南市|台南市|高雄市|基隆市|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|臺東|台東|澎湖|金門)/
+      );
+      if (zipMatch && TAIWAN_ZIP_TO_REGION[zipMatch[1]]) {
+        const zipRegion = TAIWAN_ZIP_TO_REGION[zipMatch[1]];
+        if (zipRegion.city === nearestCity) {
+          const zipCentroid = DISTRICT_CENTROIDS.find(
+            (c) => c.city === zipRegion.city && c.district === zipRegion.district
+          );
+          if (
+            zipCentroid &&
+            calculateDistanceMeters(lat, lng, zipCentroid.lat, zipCentroid.lng) < 3500
+          ) {
+            nearestDist = zipRegion.district;
+          }
+        }
+      }
+
+      return {
+        country: '台灣',
+        city: nearestCity || '台南市',
+        district: nearestDist || '中西區',
+      };
+    }
+  }
+
+  // 2. TEXT-ONLY FALLBACK: Only executed when coordinates are completely unavailable:
+  // 2a. Japan detection
   if (
     clean.includes('日本') ||
     clean.includes('東京都') ||
@@ -1438,7 +1535,7 @@ export function extractRegionFromAddress(
   let cityRaw = '';
   let district = '';
 
-  // 3. Taiwan 3-digit Postal Code (郵遞區號) detection (e.g. "700台灣台南市金華路四段93號" -> 700 -> 台南市・中西區)
+  // 2b. Taiwan 3-digit Postal Code detection
   const zipMatch = clean.match(
     /(?:^|\s|,)(\d{3})\d{0,3}\s*(?:台灣|臺灣|臺北市|台北市|新北市|桃園市|臺中市|台中市|臺南市|台南市|高雄市|基隆市|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|臺東|台東|澎湖|金門)/
   );
@@ -1447,7 +1544,7 @@ export function extractRegionFromAddress(
     district = TAIWAN_ZIP_TO_REGION[zipMatch[1]].district;
   }
 
-  // 4. Explicit Taiwan City detection (Chinese + English)
+  // 2c. Explicit Taiwan City detection (Chinese + English)
   const twCityMatch = clean.match(
     /(台北市|臺北市|新北市|桃園市|台中市|臺中市|台南市|臺南市|高雄市|基隆市|新竹市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義市|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|臺東縣|澎湖縣|金門縣)/
   );
@@ -1463,7 +1560,6 @@ export function extractRegionFromAddress(
       district = distMatch[1];
     }
   } else if (!cityRaw) {
-    // Check short Chinese city names or English city names (e.g. "SabiSabi Coffee&Sweets in Tainan")
     const englishOrShortCityMap: Array<{ pattern: RegExp; city: string }> = [
       { pattern: /台南|臺南|\bTainan\b/i, city: '台南市' },
       { pattern: /新北市|\bNew\s*Taipei\b/i, city: '新北市' },
@@ -1492,7 +1588,7 @@ export function extractRegionFromAddress(
     }
   }
 
-  // 5. Match from known districts (e.g. 新化區 -> 台南市)
+  // 2d. Match from known districts
   if (!cityRaw || !district) {
     for (const [distKey, mappedCity] of Object.entries(DISTRICT_TO_CITY_MAP)) {
       if (clean.includes(distKey)) {
@@ -1510,7 +1606,7 @@ export function extractRegionFromAddress(
     }
   }
 
-  // 6. Match from known landmark/village/road hints (e.g. 永華里 / 湯德章大道 / 金華路四段 -> 台南市・中西區, 酣呷 -> 台南市・南區)
+  // 2e. Match from known landmark/village/road hints
   const isWeakDistrict = !district || !/[0-9]+號/.test(clean);
   if (isWeakDistrict) {
     for (const rule of LANDMARK_OR_ROAD_TO_DISTRICT) {
@@ -1520,70 +1616,6 @@ export function extractRegionFromAddress(
           district = rule.district;
           break;
         }
-      }
-    }
-  }
-
-  // 5. Verify coordinates if available (resolves BOTH city and nearest district accurately across all of Taiwan!)
-  if (
-    effectiveCoords &&
-    !isNaN(effectiveCoords.lat) &&
-    !isNaN(effectiveCoords.lng)
-  ) {
-    const { lat, lng } = effectiveCoords;
-    if (lat >= 31.0 && lat <= 45.5 && lng >= 129.0 && lng <= 145.5) {
-      return {
-        country: '日本',
-        city: '東京都',
-        district: district || '台東區',
-      };
-    }
-
-    if (lat >= 21.5 && lat <= 26.5 && lng >= 118.0 && lng <= 122.5) {
-      // Find nearest centroid globally across Taiwan
-      let globalBestDist = '';
-      let globalBestCity = '';
-      let globalMinMeters = Infinity;
-      for (const c of DISTRICT_CENTROIDS) {
-        const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
-        if (d < globalMinMeters) {
-          globalMinMeters = d;
-          globalBestCity = c.city;
-          globalBestDist = c.district;
-        }
-      }
-
-      // Check distance to closest centroid of cityRaw (if cityRaw was detected)
-      let distToCityRawMeters = Infinity;
-      if (cityRaw) {
-        for (const c of DISTRICT_CENTROIDS) {
-          if (c.city === cityRaw) {
-            const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
-            if (d < distToCityRawMeters) distToCityRawMeters = d;
-          }
-        }
-      }
-
-      // If cityRaw is empty OR coordinates are far (>40km) from cityRaw, trust coordinates for city!
-      if (!cityRaw || distToCityRawMeters > 40000) {
-        cityRaw = globalBestCity;
-        if (!district || distToCityRawMeters > 40000) {
-          district = globalBestDist;
-        }
-      } else if (!district) {
-        // cityRaw matches coordinate's region, resolve district by nearest centroid in city
-        let bestDistInCity = '';
-        let minMetersInCity = Infinity;
-        for (const c of DISTRICT_CENTROIDS) {
-          if (c.city === cityRaw) {
-            const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
-            if (d < minMetersInCity) {
-              minMetersInCity = d;
-              bestDistInCity = c.district;
-            }
-          }
-        }
-        district = bestDistInCity || globalBestDist;
       }
     }
   }

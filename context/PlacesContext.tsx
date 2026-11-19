@@ -146,6 +146,11 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     .filter(Boolean)
     .join(' ');
 
+  if (urlCoords) {
+    nextLat = urlCoords.lat;
+    nextLng = urlCoords.lng;
+  }
+
   const coordsForDetection =
     urlCoords || (!isPlaceholderAddr ? { lat: nextLat, lng: nextLng } : null);
 
@@ -435,9 +440,15 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Automatically enrich CSV/Takeout imported places in the background via /api/smart-parse
-  // so they get exact official addresses, cities, districts, and coordinates
+  // strictly preserving URL coordinates, city, and district without drift
   useEffect(() => {
     if (!isHydrated || isEnrichingRef.current) return;
+    if (
+      !settings.googleMapsApiKey ||
+      settings.googleMapsApiKey === 'your-google-maps-api-key'
+    ) {
+      return;
+    }
     const unenriched = places.filter((p) => {
       if (enrichedIdsRef.current.has(p.id)) return false;
       const isCsvOrTakeout =
@@ -471,7 +482,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 input: queryInput,
-                defaultCity: '',
+                defaultCity: item.city || '',
                 skipGemini: true,
                 categoryConfigs,
                 geminiApiKey: settings.geminiApiKey,
@@ -482,38 +493,56 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
             const data = await res.json();
             const enriched: SavedPlace | undefined = data.places?.[0];
             if (enriched) {
-              const applyEnriched = (p: SavedPlace): SavedPlace => ({
-                ...p,
-                google_place_id: enriched.google_place_id || p.google_place_id,
-                formatted_address:
-                  enriched.formatted_address || p.formatted_address,
-                country: enriched.country || p.country,
-                city: enriched.city || p.city,
-                district: enriched.district || p.district,
-                latitude: enriched.latitude || p.latitude,
-                longitude: enriched.longitude || p.longitude,
-                // CRITICAL: NEVER let background address/coordinate enrichment overwrite the user's category!
-                primary_category: p.primary_category,
-                sub_category: p.sub_category,
-                estimated_stay_mins: p.estimated_stay_mins,
-                rating: enriched.rating ?? p.rating,
-                opening_hours_json:
-                  enriched.opening_hours_json || p.opening_hours_json,
-                user_notes:
-                  enriched.user_notes &&
-                  enriched.user_notes !== '由 CSV 清單匯入' &&
-                  enriched.user_notes !== '由 Google Takeout 匯入' &&
-                  enriched.user_notes !== '透過智慧快速輸入新增'
-                    ? enriched.user_notes
-                    : p.user_notes ||
-                      resolvePlaceDescription(
-                        enriched.name || p.name,
-                        enriched.city || p.city,
-                        enriched.district || p.district,
-                        p.sub_category,
-                        enriched.formatted_address || p.formatted_address
-                      ),
-              });
+              const applyEnriched = (p: SavedPlace): SavedPlace => {
+                const hasValidCoords =
+                  Boolean(p.latitude && p.longitude && p.latitude !== 0);
+                const isSameDistrict =
+                  !p.district || enriched.district === p.district;
+                const nextAddr =
+                  isSameDistrict && enriched.formatted_address
+                    ? enriched.formatted_address
+                    : p.formatted_address;
+
+                return {
+                  ...p,
+                  google_place_id:
+                    enriched.google_place_id || p.google_place_id,
+                  formatted_address: nextAddr,
+                  country: hasValidCoords
+                    ? p.country
+                    : enriched.country || p.country,
+                  city: hasValidCoords ? p.city : enriched.city || p.city,
+                  district: hasValidCoords
+                    ? p.district
+                    : enriched.district || p.district,
+                  latitude: hasValidCoords
+                    ? p.latitude
+                    : enriched.latitude || p.latitude,
+                  longitude: hasValidCoords
+                    ? p.longitude
+                    : enriched.longitude || p.longitude,
+                  primary_category: p.primary_category,
+                  sub_category: p.sub_category,
+                  estimated_stay_mins: p.estimated_stay_mins,
+                  rating: enriched.rating ?? p.rating,
+                  opening_hours_json:
+                    enriched.opening_hours_json || p.opening_hours_json,
+                  user_notes:
+                    enriched.user_notes &&
+                    enriched.user_notes !== '由 CSV 清單匯入' &&
+                    enriched.user_notes !== '由 Google Takeout 匯入' &&
+                    enriched.user_notes !== '透過智慧快速輸入新增'
+                      ? enriched.user_notes
+                      : p.user_notes ||
+                        resolvePlaceDescription(
+                          p.name,
+                          p.city,
+                          p.district,
+                          p.sub_category,
+                          p.formatted_address
+                        ),
+                };
+              };
               setPlaces((prev) =>
                 prev.map((p) => (p.id === item.id ? applyEnriched(p) : p))
               );

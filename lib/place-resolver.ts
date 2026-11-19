@@ -109,9 +109,9 @@ export function resolvePlaceFromGoogleMapsUrl(
     defaultCity
   );
 
-  const finalCoords =
-    effectiveCoords ||
-    getCoordinatesForRegion(region.city, region.district, cleanName);
+  const finalCoords = effectiveCoords
+    ? { lat: effectiveCoords.lat, lng: effectiveCoords.lng }
+    : getCoordinatesForRegion(region.city, region.district, cleanName);
 
   // Landmark Safeguard: Tainan West Market (西市場 / 大菜市)
   if (
