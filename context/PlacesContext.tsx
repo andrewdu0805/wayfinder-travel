@@ -179,6 +179,22 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     nextAddr = nextAddr.replace('市中心', nextDist);
   }
 
+  // 4. Coordinate self-healing: if coordinates came from an old synthetic district centroid that doesn't match the true district
+  if (!urlCoords) {
+    if (
+      nextName.includes('酣呷') ||
+      nextName.includes('The Han Jia') ||
+      nextName.includes('The Han-Jia')
+    ) {
+      nextLat = 22.9868;
+      nextLng = 120.1979;
+    } else if (nextCity === '台南市' && nextDist === '南區' && nextLat > 23.00) {
+      const newCoords = getCoordinatesForRegion(nextCity, nextDist, nextName);
+      nextLat = newCoords.lat;
+      nextLng = newCoords.lng;
+    }
+  }
+
   return {
     ...p,
     name: nextName,

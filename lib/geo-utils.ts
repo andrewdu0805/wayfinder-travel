@@ -252,6 +252,9 @@ const LANDMARK_OR_ROAD_TO_DISTRICT: Array<{
       '梅鑫海產',
       'SabiSabi',
       '赫玖',
+      '和意路',
+      '和意街',
+      '德記古早味汕頭豆花',
     ],
     city: '台南市',
     district: '中西區',
@@ -317,6 +320,16 @@ const LANDMARK_OR_ROAD_TO_DISTRICT: Array<{
       '明興路',
       '灣裡',
       '喜樹',
+      '新昌里',
+      '酣呷',
+      'The Han-Jia',
+      'The Han Jia',
+      '下林米糕',
+      '下林',
+      '阿銘牛肉麵',
+      '藍晒圖',
+      '新光三越新天地',
+      '新光三越台南新天地',
     ],
     city: '台南市',
     district: '南區',
@@ -1046,7 +1059,9 @@ export const DISTRICT_CENTROIDS: Array<{
   { city: '台南市', district: '北區', lat: 23.0065, lng: 120.2195 },   // 開元路/成大北側
   { city: '台南市', district: '東區', lat: 22.9865, lng: 120.2215 },   // 成大/育樂街/長榮路
   { city: '台南市', district: '東區', lat: 22.9765, lng: 120.2305 },   // 文化中心/崇明路
-  { city: '台南市', district: '南區', lat: 22.9685, lng: 120.1915 },   // 水交社/西門路一段南側/夏林路
+  { city: '台南市', district: '南區', lat: 22.9868, lng: 120.1979 },   // 西門路一段/新昌里/藍晒圖/新光新天地/酣呷餐酒
+  { city: '台南市', district: '南區', lat: 22.9785, lng: 120.1935 },   // 夏林路/客家文化會館
+  { city: '台南市', district: '南區', lat: 22.9685, lng: 120.1915 },   // 水交社/西門路一段南側
   { city: '台南市', district: '南區', lat: 22.9525, lng: 120.1865 },   // 灣裡/喜樹
   { city: '台南市', district: '安平區', lat: 22.9995, lng: 120.1625 }, // 安平老街/古堡
   { city: '台南市', district: '安平區', lat: 22.9895, lng: 120.1715 }, // 五期/永華路二段
@@ -1319,43 +1334,7 @@ export function extractRegionFromAddress(
   const urlCoords = extractCoordsFromGoogleMapsUrl(clean);
   const effectiveCoords = urlCoords || coords;
 
-  // 1. If effectiveCoords are present, COORDINATES TAKE ABSOLUTE PRIORITY!
-  // Any place's administrative district is strictly where its coordinates fall on the map.
-  if (
-    effectiveCoords &&
-    !isNaN(effectiveCoords.lat) &&
-    !isNaN(effectiveCoords.lng)
-  ) {
-    const { lat, lng } = effectiveCoords;
-    if (lat >= 31.0 && lat <= 45.5 && lng >= 129.0 && lng <= 145.5) {
-      return {
-        country: '日本',
-        city: '東京都',
-        district: '台東區',
-      };
-    }
 
-    if (lat >= 21.5 && lat <= 26.5 && lng >= 118.0 && lng <= 122.5) {
-      let bestDist = '';
-      let bestCity = '';
-      let minMeters = Infinity;
-      for (const c of DISTRICT_CENTROIDS) {
-        const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
-        if (d < minMeters) {
-          minMeters = d;
-          bestCity = c.city;
-          bestDist = c.district;
-        }
-      }
-      if (bestCity && bestDist && minMeters <= 35000) {
-        return {
-          country: '台灣',
-          city: bestCity,
-          district: bestDist,
-        };
-      }
-    }
-  }
 
   // 2. Japan detection
   if (
@@ -1479,33 +1458,51 @@ export function extractRegionFromAddress(
       };
     }
 
-    if (!district) {
-      let bestCity = '';
-      let bestDist = '';
-      let minMeters = Infinity;
+    if (lat >= 21.5 && lat <= 26.5 && lng >= 118.0 && lng <= 122.5) {
+      // Find nearest centroid globally across Taiwan
+      let globalBestDist = '';
+      let globalBestCity = '';
+      let globalMinMeters = Infinity;
       for (const c of DISTRICT_CENTROIDS) {
-        if (cityRaw && c.city !== cityRaw) continue;
         const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
-        if (d < minMeters && d <= 25000) {
-          minMeters = d;
-          bestCity = c.city;
-          bestDist = c.district;
+        if (d < globalMinMeters) {
+          globalMinMeters = d;
+          globalBestCity = c.city;
+          globalBestDist = c.district;
         }
       }
-      // If cityRaw was constrained but no centroid matched within 25km, search globally across all Taiwan districts
-      if (!bestDist) {
+
+      // Check distance to closest centroid of cityRaw (if cityRaw was detected)
+      let distToCityRawMeters = Infinity;
+      if (cityRaw) {
         for (const c of DISTRICT_CENTROIDS) {
-          const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
-          if (d < minMeters && d <= 25000) {
-            minMeters = d;
-            bestCity = c.city;
-            bestDist = c.district;
+          if (c.city === cityRaw) {
+            const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
+            if (d < distToCityRawMeters) distToCityRawMeters = d;
           }
         }
       }
-      if (bestDist) {
-        if (!cityRaw && bestCity) cityRaw = bestCity;
-        district = bestDist;
+
+      // If cityRaw is empty OR coordinates are far (>40km) from cityRaw, trust coordinates for city!
+      if (!cityRaw || distToCityRawMeters > 40000) {
+        cityRaw = globalBestCity;
+        if (!district || distToCityRawMeters > 40000) {
+          district = globalBestDist;
+        }
+      } else if (!district) {
+        // cityRaw matches coordinate's region, resolve district by nearest centroid in city
+        let bestDistInCity = '';
+        let minMetersInCity = Infinity;
+        for (const c of DISTRICT_CENTROIDS) {
+          if (c.city === cityRaw) {
+            const d = calculateDistanceMeters(lat, lng, c.lat, c.lng);
+            if (d < minMetersInCity) {
+              minMetersInCity = d;
+              bestDistInCity = c.district;
+            }
+          }
+        }
+        district = bestDistInCity || globalBestDist;
       }
     }
   }

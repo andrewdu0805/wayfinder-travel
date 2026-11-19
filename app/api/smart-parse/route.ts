@@ -765,6 +765,51 @@ ${resolvedInput}`,
         }
       }
 
+      // Zero-API-key open web address extraction fallback when coordinates/address are missing
+      if (
+        (!googleMapsApiKey || googleMapsApiKey === 'your-google-maps-api-key') &&
+        !hasExactCoords &&
+        (!formattedAddress ||
+          formattedAddress.includes('市中心') ||
+          !/[路街段巷弄號]/.test(formattedAddress))
+      ) {
+        try {
+          const ddgRes = await fetch(
+            `https://html.duckduckgo.com/html/?q=${encodeURIComponent(
+              cand.name + ' 地址'
+            )}`,
+            {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+              },
+              signal: AbortSignal.timeout(2000),
+            }
+          );
+          if (ddgRes.ok) {
+            const html = await ddgRes.text();
+            const addrMatch = html.match(
+              /(?:(?:\d{3})\s*)?(?:台灣|臺灣)?\s*(?:台北市|臺北市|新北市|桃園市|台中市|臺中市|台南市|臺南市|高雄市|基隆市|新竹[市縣]|苗栗縣|彰化縣|南投縣|雲林縣|嘉義[市縣]|屏東縣|宜蘭縣|花蓮縣|台東縣|臺東縣)[^\s,，。、<>\":：]{1,4}[區市鎮鄉][^\s,，。、<>\":：]{1,15}(?:路|街|大道)(?:[一二三四五六七八九十\d]+段)?(?:[0-9]+巷)?(?:[0-9]+弄)?[0-9]+(?:[之\-][0-9]+)?號/
+            );
+            if (addrMatch) {
+              formattedAddress = addrMatch[0].trim();
+              const searchedRegion = extractRegionFromAddress(formattedAddress);
+              region.city = searchedRegion.city;
+              region.district = searchedRegion.district;
+              region.country = searchedRegion.country;
+              const newCoords = getCoordinatesForRegion(
+                region.city,
+                region.district,
+                cand.name
+              );
+              lat = newCoords.lat;
+              lng = newCoords.lng;
+            }
+          }
+        } catch {
+          // ignore network timeout in serverless
+        }
+      }
+
       // Final guard: guarantee cand.name never contains any street/village/city address prefix
       const finalSep = separateNameAndAddress(cand.name);
       if (finalSep.foundAddress && finalSep.cleanName) {
@@ -779,7 +824,7 @@ ${resolvedInput}`,
       }
       const finalRegion = extractRegionFromAddress(
         `${formattedAddress} ${cand.addressHint || ''} ${rawInput}`,
-        { lat, lng },
+        hasExactCoords ? { lat, lng } : null,
         region.city
       );
       region.city = finalRegion.city;
