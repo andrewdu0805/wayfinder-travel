@@ -29,6 +29,7 @@ export function PlaceCard({ place }: PlaceCardProps) {
     categoryConfigs,
     updatePlaceInline,
     deletePlace,
+    settings,
   } = usePlaces();
 
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
@@ -47,6 +48,8 @@ export function PlaceCard({ place }: PlaceCardProps) {
           district: place.district,
           address: place.formatted_address,
           googleMapsUrl: place.google_maps_url,
+          geminiApiKey: settings.geminiApiKey,
+          googleMapsApiKey: settings.googleMapsApiKey,
         }),
       });
       const data = await res.json();

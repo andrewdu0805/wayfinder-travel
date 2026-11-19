@@ -1354,6 +1354,56 @@ export const DISTRICT_CENTROIDS: Array<{
 ];
 
 /**
+ * Strips SEO marketing slogans, promo parentheticals, and advertising keyword stuffing
+ * from store names exported from Google Maps or Takeout CSV, while preserving authentic
+ * branch names (e.g. "大成街總店", "棧貳庫店", "中正本舖", "創始旗艦店").
+ */
+export function cleanStoreName(name: string): string {
+  if (!name) return '';
+  let cleaned = name.trim();
+
+  // Known specific place overrides / normalizations
+  if (/鸚鵡螺/.test(cleaned)) {
+    return '鸚鵡螺餐酒館';
+  }
+
+  // 1. Remove promo / marketing parentheticals: (可內用), (場地租借、必吃美式漢堡...), etc.
+  const promoPattern =
+    /(?:[\(（\[【])\s*(?:[^\(\)（）\[\]【】]*(?:可內用|可外帶|僅供外帶|僅供內用|無內用|場地租借|包場|必吃|必點|必買|必訪|推薦|首選|老店|人氣|慶生|約會|求婚|聚餐|小酌|小吃|消夜|宵夜|下午茶|早午餐|附停車場|停車方便|近捷運|捷運|出口|歡迎|預約|訂位|專賣|嚴選|美味|平價|排隊|特色|料理|餐廳|酒吧|餐酒|漢堡|披薩|炸物|燒肉|火鍋|生啤|啤酒|調酒|咖啡|飲料|義大利麵)[^\(\)（）\[\]【】]*)(?:[\)）\]】])/gi;
+  cleaned = cleaned.replace(promoPattern, ' ');
+
+  // 1.1 Remove any parenthetical containing enumeration commas (、 or , or /)
+  cleaned = cleaned.replace(
+    /(?:[\(（\[【])\s*[^()（）\[\]【】]{0,10}[、,/|&][^()（）\[\]【】]*(?:[\)）\]】])/g,
+    ' '
+  );
+
+  // 1.2 Remove leftover standalone parenthetical indicators
+  cleaned = cleaned.replace(
+    /(?:[\(（\[【])\s*(?:可內用|可外帶|僅供外帶|僅供內用|無內用|附停車場|有外送|UberEats|foodpanda)\s*(?:[\)）\]】])/gi,
+    ' '
+  );
+
+  // 2. Remove common SEO marketing subtitles after dashes, pipes, slashes
+  cleaned = cleaned.replace(
+    /\s*(?:[|｜/／—–]|-(?!\s*[^\s-]{1,6}(?:店|門市|分店|旗艦店|本舖|總店|館|分館)))\s*(?:[^\s]+(?:必吃|推薦|首選|慶生|約會|聚餐|小酌|人氣|美食|包場|租借|打卡|宵夜|平價|老字號)[^\s]*)/gi,
+    ' '
+  );
+
+  // 3. Remove trailing SEO keyword tags
+  cleaned = cleaned
+    .replace(/\bBAR\s+[A-Z0-9_-]+\b/gi, '')
+    .replace(/\bSSN\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 4. Remove trailing punctuation
+  cleaned = cleaned.replace(/[-|｜/／:：,，、]+$/, '').trim();
+
+  return cleaned || name.trim();
+}
+
+/**
  * Separate full string (e.g. from Google Maps share text or URL) into clean store name and address
  */
 export function separateNameAndAddress(input: string): {
@@ -1429,6 +1479,8 @@ export function separateNameAndAddress(input: string): {
     .replace(/·|-/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+  cleanName = cleanStoreName(cleanName);
 
   // If cleanName is empty (e.g. input was only an address), fallback to something readable
   if (!cleanName && foundAddress) {

@@ -20,6 +20,7 @@ import {
   INITIAL_SAVED_PLACES,
 } from '@/lib/default-data';
 import {
+  cleanStoreName,
   extractCoordsFromGoogleMapsUrl,
   extractRegionFromAddress,
   getCoordinatesForRegion,
@@ -77,7 +78,7 @@ function normalizePlaceName(name: string): string {
 
 export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   const sep = separateNameAndAddress(p.name);
-  let nextName = p.name;
+  let nextName = cleanStoreName(p.name) || p.name;
   let nextAddr = p.formatted_address || '';
   let nextCity = p.city;
   let nextDist = p.district;
@@ -119,7 +120,7 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     (!hasSpecificHouseNumber && (nextAddr.includes('永康區') || nextAddr.includes('鹽埕區')));
 
   if (sep.foundAddress && sep.cleanName && sep.cleanName !== p.name) {
-    nextName = sep.cleanName;
+    nextName = cleanStoreName(sep.cleanName) || sep.cleanName;
     if (
       isPlaceholderAddr ||
       nextAddr.includes('鹽埕區臺南市') ||
@@ -317,7 +318,14 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     nextNotes.includes('深獲旅人與老饕喜愛') ||
     nextNotes.includes('由 CSV 清單匯入') ||
     nextNotes.includes('由 Google Takeout 匯入') ||
-    nextNotes.includes('透過智慧快速輸入新增');
+    nextNotes.includes('透過智慧快速輸入新增') ||
+    nextNotes.includes('以特色調酒與創意下酒料理聞名') ||
+    nextNotes.includes('以特色原創調酒與精緻下酒料理聞名') ||
+    nextNotes.includes('在地人氣餐酒酒吧') ||
+    nextNotes.includes('人氣餐酒酒吧') ||
+    nextNotes.includes('超人氣異國風味料理餐館') ||
+    nextNotes.includes('在地排隊經典傳統麵攤') ||
+    nextNotes.includes('人氣招牌烤雞與經典禽肉名店');
 
   if (!nextNotes || isOldBoilerplate || hasCrossDistrictConflict) {
     nextNotes = resolvePlaceDescription(

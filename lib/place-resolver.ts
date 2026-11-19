@@ -1,6 +1,7 @@
 import { SavedPlace, CategoryConfig } from '@/types/place';
 import { DEFAULT_CATEGORY_CONFIGS } from '@/lib/default-data';
 import {
+  cleanStoreName,
   extractCoordsFromGoogleMapsUrl,
   extractPlaceNameFromGoogleMapsUrl,
   extractRegionFromAddress,
@@ -63,7 +64,7 @@ export function resolvePlaceFromGoogleMapsUrl(
 
   // Separate pure store name from any embedded address or parenthetical note
   const sep = separateNameAndAddress(rawName);
-  const cleanName = sep.cleanName || rawName;
+  const cleanName = cleanStoreName(sep.cleanName || rawName);
   const addressFromTitle =
     sep.foundAddress ||
     (fallbackTitle ? separateNameAndAddress(fallbackTitle).foundAddress : '') ||

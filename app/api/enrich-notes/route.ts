@@ -73,12 +73,14 @@ export async function POST(req: NextRequest) {
     if (geminiApiKey && geminiApiKey !== 'your-gemini-api-key') {
       try {
         const ai = new GoogleGenAI({ apiKey: geminiApiKey });
-        const prompt = `你現在是 Google Maps 上的「評論摘要 (摘要由 Gemini 生成)」模組。
-請為位於「${city}${district}」的「${name}」（地址/參考：${address || '在地人氣推薦'}）生成一段 35~75 字的真實顧客評價精華總結。
-寫作規範：
-1. 必須以客觀歸納口吻（如：「顧客表示這家餐廳的...，他們特別提到...」或「在地老饕推薦必點...」）。
-2. 內容必須嚴格針對「${city}${district}」的這間具體店家，精準點出該店真實的招牌菜色（如牛肉湯、肉燥飯、續湯免費等）、口味特色或氛圍服務，絕對不可把中西區的特色寫到新化區去。
-3. 輸出純文字繁體中文，不加 Markdown 粗體、不加引號或標題。`;
+        const prompt = `你現在是 Google Maps 上的「評論摘要 (摘要由 Gemini 生成)」官方模組。
+請為位於「${city}${district}」的「${name}」（地址/參考：${address || '在地推薦'}）生成一段 50~100 字的真實顧客評價總結。
+寫作格式規範（必須嚴格遵守 Google Maps 評論摘要官方語氣與結構）：
+1. 第一句：以「顧客表示這家[餐廳/酒吧/咖啡館/景點]的餐點...，特別是[具體招牌菜色或特色項目]。」開頭。
+2. 第二句：以「他們特別提到[氛圍/服務/特色飲品/環境]，包含...。」展開。
+3. 第三句：以「評論也提到，[服務態度/用餐體驗/價格]，[適合朋友聚會/適合約會/體驗非常愉快]。」作結。
+4. 內容必須嚴格針對「${city}${district}」的這間具體店家，精準點出該店真實招牌特色，絕對不可使用千篇一律的空泛套話（切勿出現「以特色調酒與創意下酒料理聞名」等句型）。
+5. 輸出純文字繁體中文，不加 Markdown、引號或標題。`;
 
         const resp = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
