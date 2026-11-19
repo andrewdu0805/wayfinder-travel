@@ -163,6 +163,21 @@ const BUILTIN_GAZETTEER: KnownPlaceTemplate[] = [
     default_notes: '明治製糖總爺工場古蹟建築群，綠意林蔭樟樹大道與紅磚洋樓工藝展館，漫步散心與賞析當代藝術展覽好去處',
     tags: ['#市定古蹟', '#藝文特區', '#林蔭大道'],
   },
+  {
+    keywords: ['西市場', '台南西市場', '大菜市', '西門市場'],
+    google_place_id: 'ChIJH5cVzGh2bjQRCSbPtqcCK14',
+    name: '西市場 (大菜市)',
+    formatted_address: '700台灣台南市中西區西門路二段177號',
+    latitude: 22.9933,
+    longitude: 120.1982,
+    primary_category: 'museum_culture',
+    sub_category: 'landmark',
+    estimated_stay_mins: 60,
+    rating: 4.5,
+    daily_hours: { open: '09:00', close: '20:00' },
+    default_notes: '台南百年市定古蹟大菜市，日治時期經典木構洋樓建築，匯集傳統老字號甜品冰品與正興街文創商圈',
+    tags: ['#市定古蹟', '#大菜市', '#正興街商圈'],
+  },
 ];
 
 function inferCategoryHeuristic(
@@ -807,14 +822,14 @@ ${resolvedInput}`,
 
       if (googleMapsApiKey && googleMapsApiKey !== 'your-google-maps-api-key') {
         try {
-          const searchCityHint =
-            explicitRegion.city || rawDefaultCity || '台灣';
+          const targetCity =
+            explicitRegion.city || region.city || rawDefaultCity || defaultCity || '台南市';
           const searchQuery =
             cand.addressHint && !cand.name.includes(cand.addressHint)
               ? `${cand.name} ${cand.addressHint}`
-              : urlDetectedCoords
+              : cand.name.includes(targetCity)
               ? cand.name
-              : `${cand.name} ${searchCityHint}`;
+              : `${cand.name} ${targetCity}`;
 
           const requestBody: Record<string, unknown> = {
             textQuery: searchQuery,
@@ -850,33 +865,55 @@ ${resolvedInput}`,
             const placesData = await placesRes.json();
             const top = placesData.places?.[0];
             if (top) {
-              placeId = top.id || placeId;
-              if (top.displayName?.text) {
-                cand.name = top.displayName.text;
-              }
-              if (top.location?.latitude && top.location?.longitude) {
-                lat = top.location.latitude;
-                lng = top.location.longitude;
-                hasExactCoords = true;
-              }
-              if (top.formattedAddress) {
-                formattedAddress = top.formattedAddress;
-                const officialRegion = extractRegionFromAddress(
-                  top.formattedAddress,
-                  hasExactCoords ? { lat, lng } : null,
-                  region.city
+              let isCrossCityDrift = false;
+              if (urlDetectedCoords && top.location?.latitude && top.location?.longitude) {
+                // If top result is more than 8km away from our pin coordinates, reject cross-city drift!
+                const distKm = Math.hypot(
+                  (top.location.latitude - urlDetectedCoords.lat) * 111,
+                  (top.location.longitude - urlDetectedCoords.lng) * 102
                 );
-                region.city = officialRegion.city;
-                region.district = officialRegion.district;
-                region.country = officialRegion.country;
+                if (distKm > 8) {
+                  isCrossCityDrift = true;
+                }
               }
-              if (top.editorialSummary?.text) {
-                cand.user_notes = top.editorialSummary.text;
+
+              // Also check if top's address belongs to a completely different city than our targetCity
+              if (top.formattedAddress && targetCity) {
+                const foundCityInTop = extractRegionFromAddress(top.formattedAddress).city;
+                if (foundCityInTop && targetCity && foundCityInTop !== targetCity) {
+                  isCrossCityDrift = true;
+                }
               }
-              rating = top.rating ?? rating;
-              if (top.regularOpeningHours?.weekdayDescriptions) {
-                weekdayDescriptions =
-                  top.regularOpeningHours.weekdayDescriptions;
+
+              if (!isCrossCityDrift) {
+                placeId = top.id || placeId;
+                if (top.displayName?.text) {
+                  cand.name = top.displayName.text;
+                }
+                if (top.location?.latitude && top.location?.longitude) {
+                  lat = top.location.latitude;
+                  lng = top.location.longitude;
+                  hasExactCoords = true;
+                }
+                if (top.formattedAddress) {
+                  formattedAddress = top.formattedAddress;
+                  const officialRegion = extractRegionFromAddress(
+                    top.formattedAddress,
+                    hasExactCoords ? { lat, lng } : null,
+                    region.city
+                  );
+                  region.city = officialRegion.city;
+                  region.district = officialRegion.district;
+                  region.country = officialRegion.country;
+                }
+                if (top.editorialSummary?.text) {
+                  cand.user_notes = top.editorialSummary.text;
+                }
+                rating = top.rating ?? rating;
+                if (top.regularOpeningHours?.weekdayDescriptions) {
+                  weekdayDescriptions =
+                    top.regularOpeningHours.weekdayDescriptions;
+                }
               }
             }
           }

@@ -195,6 +195,12 @@ export const KNOWN_PLACE_GOOGLE_MAPS_DESCRIPTIONS: KnownPlaceDesc[] = [
     district: '中西區',
     description: '台南歷史悠久在地人氣夜市，地瓜球、排骨酥與特色小吃聚集',
   },
+  {
+    keywords: ['西市場', '大菜市', '西門市場'],
+    city: '台南市',
+    district: '中西區',
+    description: '台南百年市定古蹟大菜市，日治時期經典木構洋樓建築，匯集傳統老字號甜品冰品與正興街文創商圈',
+  },
 
   // 安平區
   {

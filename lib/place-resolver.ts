@@ -113,6 +113,18 @@ export function resolvePlaceFromGoogleMapsUrl(
     effectiveCoords ||
     getCoordinatesForRegion(region.city, region.district, cleanName);
 
+  // Landmark Safeguard: Tainan West Market (西市場 / 大菜市)
+  if (
+    (cleanName.includes('西市場') || cleanName.includes('大菜市')) &&
+    !addressFromTitle.includes('嘉義') &&
+    (region.city === '嘉義市' || !region.city || defaultCity === '台南市')
+  ) {
+    region.city = '台南市';
+    region.district = '中西區';
+    finalCoords.lat = 22.9933;
+    finalCoords.lng = 120.1982;
+  }
+
   // 5. Category Inference
   const cat = inferPlaceCategoryByName(`${cleanName} ${userNote}`);
   const matchedCfg = categoryConfigs.find(

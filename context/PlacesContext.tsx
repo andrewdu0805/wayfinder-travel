@@ -86,6 +86,7 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   let nextPrimary = p.primary_category;
   let nextSub = p.sub_category;
   let nextStay = p.estimated_stay_mins;
+  let nextNotes = p.user_notes || '';
 
   const isImportedRecord =
     p.id?.startsWith('csv-') ||
@@ -223,6 +224,30 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
       nextStay = 90;
     }
   } else if (
+    nextName.includes('西市場') ||
+    nextName.includes('大菜市') ||
+    nextName.includes('西門市場')
+  ) {
+    if (
+      nextCity === '嘉義市' ||
+      !nextCity ||
+      isPlaceholderAddr ||
+      nextAddr.includes('嘉義') ||
+      nextDist === '西區'
+    ) {
+      nextCity = '台南市';
+      nextDist = '中西區';
+      nextLat = 22.9933;
+      nextLng = 120.1982;
+      nextAddr = '700臺南市中西區西門路二段177號';
+      if (nextPrimary === 'restaurant' && nextSub === 'meal') {
+        nextPrimary = 'museum_culture';
+        nextSub = 'landmark';
+        nextStay = 60;
+      }
+      nextNotes = '台南百年市定古蹟大菜市，日治時期經典木構洋樓建築，匯集傳統老字號甜品冰品與正興街文創商圈';
+    }
+  } else if (
     nextCity === '台南市' &&
     nextDist === '永康區' &&
     (nextName.includes('西門路') ||
@@ -260,7 +285,7 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   // 5. Google Maps-style Note & Description Auto-Resolution:
   // If notes are empty or generic import placeholders like "由 CSV 清單匯入", automatically resolve a rich Google Maps description!
   // ALSO: Self-heal cross-district notes mismatch (e.g. 新化區 store previously erroneously assigned 國華街 note)
-  let nextNotes = p.user_notes || '';
+  if (!nextNotes) nextNotes = p.user_notes || '';
   const hasCrossDistrictConflict =
     (nextDist !== '中西區' && nextNotes.includes('國華街')) ||
     (nextDist !== '中西區' && nextNotes.includes('保安路')) ||
