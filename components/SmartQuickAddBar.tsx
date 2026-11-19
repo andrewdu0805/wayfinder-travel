@@ -21,6 +21,7 @@ import {
   separateNameAndAddress,
 } from '@/lib/geo-utils';
 import { SavedPlace, VisitStatus } from '@/types/place';
+import { ImportPreviewModal } from '@/components/ImportPreviewModal';
 
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
@@ -64,6 +65,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
   const [selectedCityOverride, setSelectedCityOverride] = useState<string>('');
   const [isParsing, setIsParsing] = useState(false);
   const [showFileImport, setShowFileImport] = useState(false);
+  const [previewPlaces, setPreviewPlaces] = useState<SavedPlace[] | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -242,19 +244,16 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
         for (let i = 0; i < lines.length; i++) {
           const cols = parseCsvLine(lines[i]);
           const firstCol = (cols[0] || '').trim();
-          // Skip header row or blank rows
+          // Skip header row or blank rows (including corrupted Big5 headers like '琿？ 螭？ 蝮廢?')
           if (
             !firstCol ||
-            /^(標題|店名|名稱|Title|Name)$/i.test(firstCol)
+            /^(標題|店名|名稱|Title|Name)$/i.test(firstCol) ||
+            /^(琿|螭|蝮|摨)/.test(firstCol)
           ) {
             continue;
           }
-          const sep = separateNameAndAddress(firstCol);
-          const title = sep.cleanName || firstCol;
           const note = cols[1] || '';
-          // Scan across all columns in this CSV row for coordinates:
-          // 1. Any Google Maps URL with S2CellId (!1s0x...) or pin (!3d...!4d...) or @lat,lng
-          // 2. Any explicit numeric lat, lng columns
+          // Scan across all columns in this CSV row for coordinates & URLs:
           let rowCoords: { lat: number; lng: number } | null = null;
           let foundUrl = '';
 
@@ -289,6 +288,34 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
           try {
             decodedUrl = decodeURIComponent(url);
           } catch {}
+
+          // Recover real Chinese place name if firstCol is corrupted by Big5 / ANSI Excel export
+          let recoveredName = '';
+          if (url) {
+            try {
+              const placeMatch = url.match(/\/maps\/place\/([^/?#]+)/);
+              if (placeMatch) {
+                const dec = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '));
+                if (dec && !/^0x[0-9a-f]+:0x[0-9a-f]+/i.test(dec)) {
+                  recoveredName = dec;
+                }
+              }
+              if (!recoveredName) {
+                const queryMatch = url.match(/[?&]query=([^&#]+)/);
+                if (queryMatch) {
+                  const dec = decodeURIComponent(queryMatch[1].replace(/\+/g, ' '));
+                  if (dec) recoveredName = dec;
+                }
+              }
+            } catch {}
+          }
+
+          const hasMojibake =
+            /[?？]/.test(firstCol) || /[\u4e00-\u9fa5]+[?？]/.test(firstCol);
+          const sep = separateNameAndAddress(firstCol);
+          // Prefer recovered official name from Google Maps URL to prevent Big5/ANSI Excel mojibake (e.g. 握 懷 -> 布雷夫烘焙)
+          const title =
+            recoveredName || (hasMojibake ? recoveredName : sep.cleanName || firstCol);
 
           const region = extractRegionFromAddress(
             `${sep.foundAddress || ''} ${title} ${firstCol} ${note} ${decodedUrl}`,
@@ -339,7 +366,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
       }
 
       if (imported.length > 0) {
-        smartUpsertPlaces(imported);
+        setPreviewPlaces(imported);
         setShowFileImport(false);
       } else {
         setErrorMsg('檔案中找不到可匯入的景點資料，請確認格式');
@@ -448,27 +475,40 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
 
       {/* Optional Collapsible File Import Dropzone */}
       {showFileImport && (
-        <div className="rounded-xl border border-dashed border-stone-300 bg-stone-50 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="text-sm sm:text-base text-stone-700 font-medium">
-            支援匯入 Google Takeout <code>Saved Places.json</code>、<code>.csv</code> 或備份檔
+        <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 sm:p-5 space-y-3.5">
+          {/* Friendly Tip about Excel Encoding */}
+          <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3 sm:p-4 text-xs sm:text-sm text-stone-700 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-amber-900">
+              <Sparkles className="h-4 w-4 text-amber-700 shrink-0" />
+              <span>匯入前不用辛苦在 Excel 整理！系統提供直接預覽整理</span>
+            </div>
+            <p className="text-stone-600 leading-relaxed text-xs sm:text-sm">
+              Google Takeout 輸出的 CSV 是標準 UTF-8 編碼（無 BOM），Windows Excel 點開常會變成「亂碼」。您<strong>不需要先手動修改 Excel</strong>，直接將檔案選入此處，系統會自動解碼中文並開啟<strong>「預覽整理面板」</strong>供您挑選、剔除與確認；或可一鍵下載在 Excel 完美顯示的繁中 CSV！
+            </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,.geojson,.csv"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-            <button
-              id="btn-select-import-file"
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm sm:text-base font-bold text-white hover:bg-teal-800 transition-colors cursor-pointer"
-            >
-              <Upload className="h-4 w-4" />
-              選擇檔案
-            </button>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+            <div className="text-xs sm:text-sm text-stone-600 font-medium">
+              支援 Google Takeout <code>已儲存的地點.csv</code>、<code>Saved Places.json</code> 或自製 CSV
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,.geojson,.csv"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+              <button
+                id="btn-select-import-file"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-xs sm:text-sm font-bold text-white hover:bg-teal-800 transition-colors shadow-xs cursor-pointer"
+              >
+                <Upload className="h-4 w-4" />
+                選擇檔案並整理
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -477,6 +517,19 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
         <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-base font-bold text-red-700">
           {errorMsg}
         </div>
+      )}
+
+      {/* Import Preview & Tidy Modal */}
+      {previewPlaces && (
+        <ImportPreviewModal
+          initialPlaces={previewPlaces}
+          categoryConfigs={categoryConfigs}
+          onConfirmImport={(selectedPlaces) => {
+            smartUpsertPlaces(selectedPlaces);
+            setPreviewPlaces(null);
+          }}
+          onClose={() => setPreviewPlaces(null)}
+        />
       )}
 
       {/* Instant Inline Edit Banner */}
