@@ -313,7 +313,15 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     (nextDist !== '北區' && nextNotes.includes('崇安街')) ||
     (nextDist !== '安平區' && nextNotes.includes('安平'));
 
+  const isCategoryMismatchNote =
+    (nextPrimary !== 'restaurant' &&
+      (nextNotes.includes('這家餐廳的餐點美味') ||
+        nextNotes.includes('特別是招牌主食、特調醬汁'))) ||
+    (nextSub === 'museum' &&
+      nextNotes.includes('參觀者表示這座文化展館的展覽內容豐富且策展用心'));
+
   const isOldBoilerplate =
+    isCategoryMismatchNote ||
     nextNotes.includes('Google Maps 在地高評價推薦熱點') ||
     nextNotes.includes('深獲旅人與老饕喜愛') ||
     nextNotes.includes('由 CSV 清單匯入') ||
@@ -474,16 +482,21 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Automatically enrich CSV/Takeout imported places in the background via /api/smart-parse
+  // Automatically enrich CSV/Takeout imported places in the background
   // strictly preserving URL coordinates, city, and district without drift
   useEffect(() => {
     if (!isHydrated || isEnrichingRef.current) return;
-    if (
-      !settings.googleMapsApiKey ||
-      settings.googleMapsApiKey === 'your-google-maps-api-key'
-    ) {
+    const hasMapsKey =
+      Boolean(settings.googleMapsApiKey) &&
+      settings.googleMapsApiKey !== 'your-google-maps-api-key';
+    const hasGeminiKey =
+      Boolean(settings.geminiApiKey) &&
+      settings.geminiApiKey !== 'your-gemini-api-key';
+
+    if (!hasMapsKey && !hasGeminiKey) {
       return;
     }
+
     const unenriched = places.filter((p) => {
       if (enrichedIdsRef.current.has(p.id)) return false;
       const isCsvOrTakeout =
@@ -494,8 +507,14 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         p.custom_tags?.includes('#CSV匯入') ||
         p.custom_tags?.includes('#Takeout匯入');
       if (!isCsvOrTakeout) return false;
-      // Needs enrichment if formatted_address has no street/number (號/路/街)
-      return !/[路街段巷弄號大道]/.test(p.formatted_address || '');
+      // Needs enrichment if formatted_address has no street/number OR note is a generic template
+      const needsAddress = !/[路街段巷弄號大道]/.test(p.formatted_address || '');
+      const needsNote =
+        !p.user_notes ||
+        p.user_notes.includes('參觀者表示這座文化展館的展覽內容豐富且策展用心') ||
+        p.user_notes.includes('顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食') ||
+        p.user_notes.includes('顧客表示這家酒吧提供美味又獨特的調酒與豐富飲品');
+      return needsAddress || needsNote;
     });
 
     if (unenriched.length === 0) return;
@@ -507,63 +526,99 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           if (enrichedIdsRef.current.has(item.id)) continue;
           enrichedIdsRef.current.add(item.id);
           try {
-            const queryInput =
-              item.google_maps_url &&
-              !item.google_maps_url.includes('maps/search/?api=1&query=')
-                ? `${item.name} ${item.google_maps_url}`
-                : item.name;
-            const res = await fetch('/api/smart-parse', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                input: queryInput,
-                defaultCity: item.city || '',
-                skipGemini: true,
-                categoryConfigs,
-                geminiApiKey: settings.geminiApiKey,
-                googleMapsApiKey: settings.googleMapsApiKey,
-              }),
-            });
-            if (!res.ok) continue;
-            const data = await res.json();
-            const enriched: SavedPlace | undefined = data.places?.[0];
-            if (enriched) {
+            let fetchedNote = '';
+
+            // 1. Fetch official Google Maps Review Summary / Grounded Gemini Summary via /api/enrich-notes
+            try {
+              const noteRes = await fetch('/api/enrich-notes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  name: item.name,
+                  city: item.city,
+                  district: item.district,
+                  subCategory: item.sub_category,
+                  address: item.formatted_address,
+                  latitude: item.latitude,
+                  longitude: item.longitude,
+                  geminiApiKey: settings.geminiApiKey,
+                  googleMapsApiKey: settings.googleMapsApiKey,
+                }),
+              });
+              if (noteRes.ok) {
+                const noteData = await noteRes.json();
+                if (noteData.description) {
+                  fetchedNote = noteData.description;
+                }
+              }
+            } catch {
+              // ignore individual note lookup error
+            }
+
+            // 2. If Google Maps API key is present and address is missing street details, enrich via /api/smart-parse
+            let enriched: SavedPlace | undefined;
+            if (hasMapsKey && !/[路街段巷弄號大道]/.test(item.formatted_address || '')) {
+              const queryInput =
+                item.google_maps_url &&
+                !item.google_maps_url.includes('maps/search/?api=1&query=')
+                  ? `${item.name} ${item.google_maps_url}`
+                  : item.name;
+              const res = await fetch('/api/smart-parse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  input: queryInput,
+                  defaultCity: item.city || '',
+                  skipGemini: true,
+                  categoryConfigs,
+                  geminiApiKey: settings.geminiApiKey,
+                  googleMapsApiKey: settings.googleMapsApiKey,
+                }),
+              });
+              if (res.ok) {
+                const data = await res.json();
+                enriched = data.places?.[0];
+              }
+            }
+
+            if (enriched || fetchedNote) {
               const applyEnriched = (p: SavedPlace): SavedPlace => {
                 const hasValidCoords =
                   Boolean(p.latitude && p.longitude && p.latitude !== 0);
                 const isSameDistrict =
-                  !p.district || enriched.district === p.district;
+                  !p.district || !enriched?.district || enriched.district === p.district;
                 const nextAddr =
-                  isSameDistrict && enriched.formatted_address
+                  isSameDistrict && enriched?.formatted_address
                     ? enriched.formatted_address
                     : p.formatted_address;
 
                 return {
                   ...p,
                   google_place_id:
-                    enriched.google_place_id || p.google_place_id,
+                    enriched?.google_place_id || p.google_place_id,
                   formatted_address: nextAddr,
                   country: hasValidCoords
                     ? p.country
-                    : enriched.country || p.country,
-                  city: hasValidCoords ? p.city : enriched.city || p.city,
+                    : enriched?.country || p.country,
+                  city: hasValidCoords ? p.city : enriched?.city || p.city,
                   district: hasValidCoords
                     ? p.district
-                    : enriched.district || p.district,
+                    : enriched?.district || p.district,
                   latitude: hasValidCoords
                     ? p.latitude
-                    : enriched.latitude || p.latitude,
+                    : enriched?.latitude || p.latitude,
                   longitude: hasValidCoords
                     ? p.longitude
-                    : enriched.longitude || p.longitude,
+                    : enriched?.longitude || p.longitude,
                   primary_category: p.primary_category,
                   sub_category: p.sub_category,
                   estimated_stay_mins: p.estimated_stay_mins,
-                  rating: enriched.rating ?? p.rating,
+                  rating: enriched?.rating ?? p.rating,
                   opening_hours_json:
-                    enriched.opening_hours_json || p.opening_hours_json,
+                    enriched?.opening_hours_json || p.opening_hours_json,
                   user_notes:
-                    enriched.user_notes &&
+                    fetchedNote ||
+                    (enriched?.user_notes &&
                     enriched.user_notes !== '由 CSV 清單匯入' &&
                     enriched.user_notes !== '由 Google Takeout 匯入' &&
                     enriched.user_notes !== '透過智慧快速輸入新增'
@@ -575,7 +630,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                           p.district,
                           p.sub_category,
                           p.formatted_address
-                        ),
+                        )),
                 };
               };
               setPlaces((prev) =>

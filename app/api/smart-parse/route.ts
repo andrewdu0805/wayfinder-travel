@@ -994,7 +994,7 @@ ${resolvedInput}`,
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': googleMapsApiKey,
                 'X-Goog-FieldMask':
-                  'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.editorialSummary',
+                  'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.reviewSummary,places.generativeSummary,places.editorialSummary',
               },
               body: JSON.stringify(requestBody),
               signal: AbortSignal.timeout(5000),
@@ -1045,8 +1045,16 @@ ${resolvedInput}`,
                   region.district = officialRegion.district;
                   region.country = officialRegion.country;
                 }
-                if (top.editorialSummary?.text) {
-                  cand.user_notes = top.editorialSummary.text;
+                const officialReviewSummary =
+                  top.reviewSummary?.text?.text ||
+                  (typeof top.reviewSummary?.text === 'string'
+                    ? top.reviewSummary.text
+                    : '') ||
+                  top.generativeSummary?.description?.text ||
+                  top.generativeSummary?.overview?.text ||
+                  top.editorialSummary?.text;
+                if (officialReviewSummary) {
+                  cand.user_notes = officialReviewSummary.trim();
                 }
                 rating = top.rating ?? rating;
                 if (top.regularOpeningHours?.weekdayDescriptions) {
