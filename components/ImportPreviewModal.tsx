@@ -548,12 +548,22 @@ export function ImportPreviewModal({
                       )}
                     </div>
 
-                    {/* Address */}
-                    {p.formatted_address && (
-                      <p className="text-xs text-stone-500 truncate">
-                        {p.formatted_address}
-                      </p>
-                    )}
+                    {/* Address & Opening Hours */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-stone-500">
+                      {p.formatted_address && (
+                        <span className="truncate max-w-[260px] sm:max-w-sm">
+                          📍 {p.formatted_address}
+                        </span>
+                      )}
+                      {(p.opening_hours_json?.weekday_descriptions?.[0] ||
+                        p.opening_hours_json?.daily_hours) && (
+                        <span className="truncate max-w-[240px] text-amber-800/80 font-medium">
+                          🕒{' '}
+                          {p.opening_hours_json.weekday_descriptions?.[0] ||
+                            `每日 ${p.opening_hours_json.daily_hours?.open}–${p.opening_hours_json.daily_hours?.close}`}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Right Actions */}

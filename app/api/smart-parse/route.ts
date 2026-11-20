@@ -8,6 +8,11 @@ import {
 } from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
 import { resolvePlaceFromGoogleMapsUrl } from '@/lib/place-resolver';
+import {
+  enrichPlaceFromGoogleMapsUrl,
+  mapGoogleCategoryToAppCategory,
+  parseGoogleOpeningHours,
+} from '@/lib/google-maps-enricher';
 import { CategoryConfig, SavedPlace, VisitStatus } from '@/types/place';
 import { DEFAULT_CATEGORY_CONFIGS } from '@/lib/default-data';
 
@@ -344,19 +349,29 @@ export async function POST(req: NextRequest) {
       body.googleMapsApiKey || process.env.GOOGLE_MAPS_API_KEY || '';
 
     // 0. Batch Google Maps URL Mode (used for CSV Takeout batch import)
-    // Ensures that every row in the CSV is processed with the exact same authority and logic as single URL paste!
+    // Strictly uses the CSV's Google Maps URL as the primary reference to populate
+    // official Google Maps store name, category, opening hours, address, and review summary!
     if (Array.isArray(body.batch) && body.batch.length > 0) {
-      const parsedBatch: SavedPlace[] = [];
       const nowIso = new Date().toISOString();
 
-      for (const item of body.batch) {
+      const resolveOneRow = async (item: {
+        url?: string;
+        title?: string;
+        note?: string;
+        rowCoords?: { lat: number; lng: number } | null;
+      }): Promise<SavedPlace> => {
         const itemUrl = String(item.url || '').trim();
         const itemTitle = String(item.title || '').trim();
         const itemNote = String(item.note || '').trim();
+        const hasUserCustomNote =
+          Boolean(itemNote) &&
+          itemNote !== '由 CSV 清單匯入' &&
+          itemNote !== '由 Google Takeout 匯入' &&
+          itemNote !== '透過智慧快速輸入新增';
 
         // 1. If Google Maps URL or row coordinates exist, URL is the SUPREME AUTHORITY:
         if (itemUrl || item.rowCoords) {
-          const resolved = resolvePlaceFromGoogleMapsUrl({
+          const baseResolved = resolvePlaceFromGoogleMapsUrl({
             url: itemUrl,
             fallbackTitle: itemTitle,
             userNote: itemNote,
@@ -365,8 +380,14 @@ export async function POST(req: NextRequest) {
             customTags: ['#GoogleMaps匯入'],
             rowCoords: item.rowCoords || null,
           });
-          parsedBatch.push(resolved);
-          continue;
+
+          // Enrich directly from Google Maps URL (og metadata + Places API + Gemini Maps Grounding)
+          return enrichPlaceFromGoogleMapsUrl(baseResolved, {
+            googleMapsApiKey,
+            geminiApiKey,
+            categoryConfigs,
+            hasUserCustomNote,
+          });
         }
 
         // 2. Fallback to BUILTIN_GAZETTEER only if no URL was provided in the CSV row:
@@ -378,11 +399,7 @@ export async function POST(req: NextRequest) {
 
         if (matchedTpl) {
           const region = extractRegionFromAddress(matchedTpl.formatted_address);
-          const heuristic = inferCategoryHeuristic(
-            `${matchedTpl.name} ${itemNote}`,
-            categoryConfigs
-          );
-          parsedBatch.push({
+          return {
             id: `place-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             google_place_id: matchedTpl.google_place_id,
             name: matchedTpl.name,
@@ -405,31 +422,28 @@ export async function POST(req: NextRequest) {
               ],
               daily_hours: matchedTpl.daily_hours,
             },
-            google_maps_url:
-              `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                `${matchedTpl.name} ${region.city}`
-              )}`,
-            user_notes:
-              itemNote && itemNote !== '由 CSV 清單匯入'
-                ? itemNote
-                : resolvePlaceDescription(
-                    matchedTpl.name,
-                    region.city,
-                    region.district,
-                    matchedTpl.sub_category,
-                    matchedTpl.formatted_address
-                  ),
+            google_maps_url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+              `${matchedTpl.name} ${region.city}`
+            )}`,
+            user_notes: hasUserCustomNote
+              ? itemNote
+              : resolvePlaceDescription(
+                  matchedTpl.name,
+                  region.city,
+                  region.district,
+                  matchedTpl.sub_category,
+                  matchedTpl.formatted_address
+                ),
             custom_tags: ['#GoogleMaps匯入', ...matchedTpl.tags],
             last_visited_at: null,
             hours_updated_at: nowIso,
             created_at: nowIso,
             updated_at: nowIso,
-          });
-          continue;
+          };
         }
 
         // 3. Fallback resolution if row had title but no URL and no gazetteer match
-        const resolved = resolvePlaceFromGoogleMapsUrl({
+        const baseFallback = resolvePlaceFromGoogleMapsUrl({
           url: '',
           fallbackTitle: itemTitle,
           userNote: itemNote,
@@ -438,12 +452,27 @@ export async function POST(req: NextRequest) {
           customTags: ['#GoogleMaps匯入'],
           rowCoords: null,
         });
-        parsedBatch.push(resolved);
+
+        return enrichPlaceFromGoogleMapsUrl(baseFallback, {
+          googleMapsApiKey,
+          geminiApiKey,
+          categoryConfigs,
+          hasUserCustomNote,
+        });
+      };
+
+      // Process in parallel chunks of 5 to keep CSV batch import fast & respectful of rate limits
+      const parsedBatch: SavedPlace[] = [];
+      const CONCURRENCY = 5;
+      for (let idx = 0; idx < body.batch.length; idx += CONCURRENCY) {
+        const chunk = body.batch.slice(idx, idx + CONCURRENCY);
+        const chunkResults = await Promise.all(chunk.map(resolveOneRow));
+        parsedBatch.push(...chunkResults);
       }
 
       return NextResponse.json({
         places: parsedBatch,
-        mode: 'batch_url_resolver',
+        mode: 'batch_url_google_maps_enriched',
       });
     }
 
@@ -994,7 +1023,7 @@ ${resolvedInput}`,
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': googleMapsApiKey,
                 'X-Goog-FieldMask':
-                  'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.reviewSummary,places.generativeSummary,places.editorialSummary',
+                  'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary',
               },
               body: JSON.stringify(requestBody),
               signal: AbortSignal.timeout(5000),
@@ -1045,6 +1074,18 @@ ${resolvedInput}`,
                   region.district = officialRegion.district;
                   region.country = officialRegion.country;
                 }
+                const mappedCat = mapGoogleCategoryToAppCategory(
+                  top.primaryType,
+                  top.types,
+                  top.primaryTypeDisplayName?.text,
+                  cand.name,
+                  categoryConfigs
+                );
+                if (mappedCat) {
+                  cand.primary_category = mappedCat.primary_category;
+                  cand.sub_category = mappedCat.sub_category;
+                  cand.estimated_stay_mins = mappedCat.estimated_stay_mins;
+                }
                 const officialReviewSummary =
                   top.reviewSummary?.text?.text ||
                   (typeof top.reviewSummary?.text === 'string'
@@ -1057,9 +1098,14 @@ ${resolvedInput}`,
                   cand.user_notes = officialReviewSummary.trim();
                 }
                 rating = top.rating ?? rating;
-                if (top.regularOpeningHours?.weekdayDescriptions) {
-                  weekdayDescriptions =
-                    top.regularOpeningHours.weekdayDescriptions;
+                const parsedHours = parseGoogleOpeningHours(top.regularOpeningHours);
+                if (parsedHours) {
+                  if (parsedHours.weekday_descriptions?.length) {
+                    weekdayDescriptions = parsedHours.weekday_descriptions;
+                  }
+                  if (parsedHours.daily_hours) {
+                    dailyHours = parsedHours.daily_hours;
+                  }
                 }
               }
             }
