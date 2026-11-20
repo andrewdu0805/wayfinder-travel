@@ -482,24 +482,14 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Automatically enrich CSV/Takeout imported places in the background
-  // strictly preserving URL coordinates, city, and district without drift
+  // Automatically verify & enrich imported places in the background
+  // using exact Google Maps URLs, Places API addressComponents, and Taiwan district polygons
   useEffect(() => {
     if (!isHydrated || isEnrichingRef.current) return;
-    const hasMapsKey =
-      Boolean(settings.googleMapsApiKey) &&
-      settings.googleMapsApiKey !== 'your-google-maps-api-key';
-    const hasGeminiKey =
-      Boolean(settings.geminiApiKey) &&
-      settings.geminiApiKey !== 'your-gemini-api-key';
-
-    if (!hasMapsKey && !hasGeminiKey) {
-      return;
-    }
 
     const unenriched = places.filter((p) => {
       if (enrichedIdsRef.current.has(p.id)) return false;
-      const isCsvOrTakeout =
+      const isImported =
         p.id?.startsWith('csv-') ||
         p.id?.startsWith('takeout-') ||
         p.id?.startsWith('gmaps-') ||
@@ -509,19 +499,34 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         p.custom_tags?.includes('#CSV匯入') ||
         p.custom_tags?.includes('#Takeout匯入') ||
         p.custom_tags?.includes('#GoogleMaps匯入');
-      if (!isCsvOrTakeout) return false;
-      // Needs enrichment if formatted_address has no street/number OR hours are default placeholder OR note is a generic template
+
       const needsAddress = !/[路街段巷弄號大道]/.test(p.formatted_address || '');
       const needsHours =
-        !p.opening_hours_json?.weekday_descriptions?.length ||
-        (p.opening_hours_json.weekday_descriptions.length === 1 &&
-          p.opening_hours_json.weekday_descriptions[0] === '每日 10:00–21:00');
+        isImported &&
+        (!p.opening_hours_json?.weekday_descriptions?.length ||
+          (p.opening_hours_json.weekday_descriptions.length === 1 &&
+            p.opening_hours_json.weekday_descriptions[0] === '每日 10:00–21:00'));
+      const needsEnglishNoteFix = Boolean(
+        p.user_notes &&
+          p.user_notes.trim().length > 10 &&
+          !/[\u4e00-\u9fff]/.test(p.user_notes)
+      );
       const needsNote =
-        !p.user_notes ||
-        p.user_notes.includes('參觀者表示這座文化展館的展覽內容豐富且策展用心') ||
-        p.user_notes.includes('顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食') ||
-        p.user_notes.includes('顧客表示這家酒吧提供美味又獨特的調酒與豐富飲品');
-      return needsAddress || needsHours || needsNote;
+        needsEnglishNoteFix ||
+        (isImported &&
+          (!p.user_notes ||
+            p.user_notes.includes('參觀者表示這座文化展館的展覽內容豐富且策展用心') ||
+            p.user_notes.includes('顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食') ||
+            p.user_notes.includes('顧客表示這家酒吧提供美味又獨特的調酒與豐富飲品')));
+      // Check if formatted_address explicitly specifies a DIFFERENT district than p.district
+      const addrDistMatch = (p.formatted_address || '').match(
+        /(?:台北市|臺北市|新北市|桃園市|台中市|臺中市|台南市|臺南市|高雄市|基隆市|新竹市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義市|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|臺東縣|澎湖縣|金門縣)\s*([^\d\s,，。、]{1,3}?[區市鎮鄉])/
+      );
+      const hasDistrictMismatch = Boolean(
+        addrDistMatch && addrDistMatch[1] && addrDistMatch[1] !== p.district
+      );
+
+      return needsAddress || needsHours || needsNote || hasDistrictMismatch;
     });
 
     if (unenriched.length === 0) return;
@@ -560,14 +565,12 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
 
             if (enriched) {
               const applyEnriched = (p: SavedPlace): SavedPlace => {
-                const hasValidCoords =
-                  Boolean(p.latitude && p.longitude && p.latitude !== 0);
-                const isSameDistrict =
-                  !p.district || !enriched.district || enriched.district === p.district;
-                const nextAddr =
-                  isSameDistrict && enriched.formatted_address
-                    ? enriched.formatted_address
-                    : p.formatted_address;
+                const hasRealEnrichedAddr = /[路街段巷弄號大道]/.test(
+                  enriched.formatted_address || ''
+                );
+                const nextAddr = hasRealEnrichedAddr
+                  ? enriched.formatted_address
+                  : p.formatted_address || enriched.formatted_address;
 
                 return {
                   ...p,
@@ -575,19 +578,11 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                   google_place_id:
                     enriched.google_place_id || p.google_place_id,
                   formatted_address: nextAddr,
-                  country: hasValidCoords
-                    ? p.country
-                    : enriched.country || p.country,
-                  city: hasValidCoords ? p.city : enriched.city || p.city,
-                  district: hasValidCoords
-                    ? p.district
-                    : enriched.district || p.district,
-                  latitude: hasValidCoords
-                    ? p.latitude
-                    : enriched.latitude || p.latitude,
-                  longitude: hasValidCoords
-                    ? p.longitude
-                    : enriched.longitude || p.longitude,
+                  country: enriched.country || p.country,
+                  city: enriched.city || p.city,
+                  district: enriched.district || p.district,
+                  latitude: enriched.latitude || p.latitude,
+                  longitude: enriched.longitude || p.longitude,
                   primary_category: enriched.primary_category || p.primary_category,
                   sub_category: enriched.sub_category || p.sub_category,
                   estimated_stay_mins:
@@ -606,10 +601,10 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                       : p.user_notes ||
                         resolvePlaceDescription(
                           p.name,
-                          p.city,
-                          p.district,
-                          p.sub_category,
-                          p.formatted_address
+                          enriched.city || p.city,
+                          enriched.district || p.district,
+                          enriched.sub_category || p.sub_category,
+                          nextAddr
                         ),
                 };
               };

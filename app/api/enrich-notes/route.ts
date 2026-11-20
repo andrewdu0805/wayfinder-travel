@@ -66,14 +66,35 @@ export async function POST(req: NextRequest) {
           const place = data.places?.[0];
 
           // A. Official Google Maps Gemini Review Summary (評論摘要 - 摘要由 Gemini 生成)
-          const reviewSummaryText =
+          let reviewSummaryText =
             place?.reviewSummary?.text?.text ||
             (typeof place?.reviewSummary?.text === 'string'
               ? place.reviewSummary.text
               : '');
+          reviewSummaryText = reviewSummaryText.trim();
+          if (reviewSummaryText && !/[\u4e00-\u9fff]/.test(reviewSummaryText)) {
+            if (geminiApiKey && geminiApiKey !== 'your-gemini-api-key') {
+              try {
+                const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+                const tr = await ai.models.generateContent({
+                  model: 'gemini-2.5-flash',
+                  contents: `請將以下 Google Maps 評論摘要忠實翻譯為自然流暢的繁體中文（保留客觀歸納語氣，只輸出翻譯後的繁體中文，不加引號）：\n${reviewSummaryText}`,
+                });
+                if (tr.text && /[\u4e00-\u9fff]/.test(tr.text)) {
+                  reviewSummaryText = tr.text.trim();
+                } else {
+                  reviewSummaryText = '';
+                }
+              } catch {
+                reviewSummaryText = '';
+              }
+            } else {
+              reviewSummaryText = '';
+            }
+          }
           if (reviewSummaryText && reviewSummaryText.length > 5) {
             return NextResponse.json({
-              description: reviewSummaryText.trim(),
+              description: reviewSummaryText,
               source: 'google_places_review_summary',
             });
           }

@@ -1565,22 +1565,27 @@ export function extractRegionFromAddress(
         }
       }
 
-      // Border fine-tuning: Only if the address contains an explicit 3-digit postal code
-      // (e.g. 700) or explicit district name with '區' in the EXACT SAME CITY, and the pin
-      // is within 3.5km of that district centroid, allow it to refine adjacent borders:
-      const zipMatch = clean.match(
-        /(?:^|\s|,)(\d{3})\d{0,3}\s*(?:台灣|臺灣|臺北市|台北市|新北市|桃園市|臺中市|台中市|臺南市|台南市|高雄市|基隆市|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|臺東|台東|澎湖|金門)/
+      // Border precision: District centroids are single points while real Taiwan districts are
+      // irregular polygons (e.g. 三民區 vs 鼓山區 along Love River, 苓雅區 vs 前金區 at Harbor).
+      // If the input text contains an EXPLICIT official City+District or 3-digit postal code
+      // belonging to the SAME city as the coordinates, ALWAYS trust that official district!
+      const explicitCityDistMatch = clean.match(
+        /(台北市|臺北市|新北市|桃園市|台中市|臺中市|台南市|臺南市|高雄市|基隆市|新竹市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義市|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|臺東縣|澎湖縣|金門縣)\s*([^\d\s,，。、]{1,3}?[區市鎮鄉])/
       );
-      if (zipMatch && TAIWAN_ZIP_TO_REGION[zipMatch[1]]) {
-        const zipRegion = TAIWAN_ZIP_TO_REGION[zipMatch[1]];
-        if (zipRegion.city === nearestCity) {
-          const zipCentroid = DISTRICT_CENTROIDS.find(
-            (c) => c.city === zipRegion.city && c.district === zipRegion.district
-          );
-          if (
-            zipCentroid &&
-            calculateDistanceMeters(lat, lng, zipCentroid.lat, zipCentroid.lng) < 3500
-          ) {
+      if (explicitCityDistMatch) {
+        const expCity = explicitCityDistMatch[1].replace('臺', '台');
+        const expDist = explicitCityDistMatch[2];
+        const validDistricts = ALL_TAIWAN_CITY_DISTRICTS[expCity] || [];
+        if (expCity === nearestCity && validDistricts.includes(expDist)) {
+          nearestDist = expDist;
+        }
+      } else {
+        const zipMatch = clean.match(
+          /(?:^|\s|,)(\d{3})\d{0,3}\s*(?:台灣|臺灣|臺北市|台北市|新北市|桃園市|臺中市|台中市|臺南市|台南市|高雄市|基隆市|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|臺東|台東|澎湖|金門)/
+        );
+        if (zipMatch && TAIWAN_ZIP_TO_REGION[zipMatch[1]]) {
+          const zipRegion = TAIWAN_ZIP_TO_REGION[zipMatch[1]];
+          if (zipRegion.city === nearestCity) {
             nearestDist = zipRegion.district;
           }
         }

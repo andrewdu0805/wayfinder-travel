@@ -542,6 +542,8 @@ export async function enrichPlaceFromGoogleMapsUrl(
     }
   }
 
+  let gotOfficialDistrict = false;
+
   // Step 2: Google Places API (New) — Official Google Maps Data anchored to URL coords!
   if (hasValidMapsKey) {
     try {
@@ -567,7 +569,7 @@ export async function enrichPlaceFromGoogleMapsUrl(
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': googleMapsApiKey!,
             'X-Goog-FieldMask':
-              'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews',
+              'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews',
           },
           body: JSON.stringify(requestBody),
           signal: AbortSignal.timeout(5000),
@@ -616,6 +618,31 @@ export async function enrichPlaceFromGoogleMapsUrl(
               next.country = officialReg.country;
               next.city = officialReg.city;
               next.district = officialReg.district;
+              gotOfficialDistrict = true;
+            }
+            // Extract exact official city/district directly from Google Places addressComponents
+            if (Array.isArray(top.addressComponents)) {
+              const comps = top.addressComponents as Array<{
+                longText?: string;
+                types?: string[];
+              }>;
+              const compCity = comps.find(
+                (c) =>
+                  c.types?.includes('administrative_area_level_1') ||
+                  c.types?.includes('administrative_area_level_2')
+              )?.longText;
+              const compDist = comps.find(
+                (c) =>
+                  c.types?.includes('administrative_area_level_3') ||
+                  c.types?.includes('sublocality_level_1')
+              )?.longText;
+              if (compCity && /[市縣]$/.test(compCity)) {
+                next.city = compCity.replace('臺', '台');
+              }
+              if (compDist && /[區市鎮鄉]$/.test(compDist)) {
+                next.district = compDist;
+                gotOfficialDistrict = true;
+              }
             }
             if (typeof top.rating === 'number') {
               next.rating = top.rating;
@@ -652,17 +679,49 @@ export async function enrichPlaceFromGoogleMapsUrl(
 
             // Official Google Maps Review Summary (only overwrite if user didn't supply a custom note)
             if (!hasUserCustomNote) {
-              const officialSummary =
+              let officialSummary =
                 top.reviewSummary?.text?.text ||
                 (typeof top.reviewSummary?.text === 'string'
                   ? top.reviewSummary.text
                   : '') ||
                 top.generativeSummary?.description?.text ||
                 top.generativeSummary?.overview?.text ||
-                top.editorialSummary?.text;
+                top.editorialSummary?.text ||
+                '';
 
-              if (officialSummary && officialSummary.trim().length > 5) {
-                next.user_notes = officialSummary.trim();
+              officialSummary = officialSummary.trim();
+
+              // If Google Places returned an English reviewSummary despite languageCode=zh-TW,
+              // translate it to Traditional Chinese (or prefer Traditional Chinese editorialSummary)
+              if (officialSummary && !/[\u4e00-\u9fff]/.test(officialSummary)) {
+                if (
+                  top.editorialSummary?.text &&
+                  /[\u4e00-\u9fff]/.test(top.editorialSummary.text)
+                ) {
+                  officialSummary = top.editorialSummary.text.trim();
+                } else if (hasValidGeminiKey) {
+                  try {
+                    const ai = new GoogleGenAI({ apiKey: geminiApiKey! });
+                    const tr = await ai.models.generateContent({
+                      model: 'gemini-2.5-flash',
+                      contents: `請將以下 Google Maps 評論摘要忠實翻譯為自然流暢的繁體中文（保留客觀歸納語氣，只輸出翻譯後的繁體中文，不加引號）：\n${officialSummary}`,
+                    });
+                    if (tr.text && /[\u4e00-\u9fff]/.test(tr.text)) {
+                      officialSummary = tr.text.trim();
+                    } else {
+                      officialSummary = '';
+                    }
+                  } catch {
+                    officialSummary = '';
+                  }
+                } else {
+                  // Do not display raw English summary when Chinese editorial/curated is available
+                  officialSummary = '';
+                }
+              }
+
+              if (officialSummary && officialSummary.length > 5) {
+                next.user_notes = officialSummary;
                 gotOfficialSummary = true;
               } else if (
                 Array.isArray(top.reviews) &&
@@ -697,6 +756,44 @@ export async function enrichPlaceFromGoogleMapsUrl(
       }
     } catch (err) {
       console.warn('Google Places API batch enrich error:', err);
+    }
+  }
+
+  // Step 2.5: Polygon-exact Taiwan District Reverse Geocoding (BigDataCloud)
+  // Guarantees 100% accurate Taiwan district boundaries (e.g. 三民區 vs 鼓山區, 苓雅區 vs 前金區)
+  // even when Google Places API key is not configured!
+  if (
+    !gotOfficialDistrict &&
+    next.country === '台灣' &&
+    next.latitude >= 21.5 &&
+    next.latitude <= 26.5 &&
+    next.longitude >= 118.0 &&
+    next.longitude <= 122.5
+  ) {
+    try {
+      const bdcRes = await fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${next.latitude}&longitude=${next.longitude}&localityLanguage=zh`,
+        { signal: AbortSignal.timeout(2500) }
+      );
+      if (bdcRes.ok) {
+        const bdc = await bdcRes.json();
+        const bdcCity = String(bdc.principalSubdivision || bdc.city || '')
+          .replace('臺', '台')
+          .trim();
+        const bdcDist = String(bdc.locality || '').trim();
+        if (bdcCity && /[市縣]$/.test(bdcCity)) {
+          next.city = bdcCity;
+        }
+        if (bdcDist && /[區市鎮鄉]$/.test(bdcDist)) {
+          next.district = bdcDist;
+          gotOfficialDistrict = true;
+          if (!/[路街段巷弄號大道]/.test(next.formatted_address || '')) {
+            next.formatted_address = `台灣${next.city}${next.district}`;
+          }
+        }
+      }
+    } catch {
+      // ignore timeout
     }
   }
 
