@@ -53,6 +53,7 @@ import {
   VisitStatus,
 } from '@/types/place';
 import { RouteVisualizerMap } from './RouteVisualizerMap';
+import { EatNowWidget } from './EatNowWidget';
 
 const QUICK_DIALOG_PRESETS = [
   {
@@ -725,8 +726,86 @@ export function ItineraryPlannerView() {
     activeDay?.endAnchor?.anchor_type === 'hsr' ||
     activeDay?.endAnchor?.anchor_type === 'train';
 
+  const handleAddEatNowPlace = (placeToAdd: SavedPlace) => {
+    if (!activePlan) {
+      setIntentText((prev) =>
+        prev.includes(placeToAdd.name)
+          ? prev
+          : `${prev ? prev + '，' : ''}想順路吃「${placeToAdd.name}」`
+      );
+      return;
+    }
+
+    if (activePlan.stops.some((s) => s.place.id === placeToAdd.id)) {
+      return;
+    }
+
+    const lastStop = activePlan.stops[activePlan.stops.length - 1];
+    const fromLat = lastStop ? lastStop.place.latitude : activePlan.origin.latitude;
+    const fromLng = lastStop ? lastStop.place.longitude : activePlan.origin.longitude;
+    const fromDep = lastStop ? lastStop.departure_time : activePlan.start_time;
+
+    const distM = calculateDistanceMeters(
+      fromLat,
+      fromLng,
+      placeToAdd.latitude,
+      placeToAdd.longitude
+    );
+    const travelMins = estimateTravelMins(distM, activePlan.travel_mode);
+    const arrival = addMinutesToTime(fromDep, travelMins);
+    const stayMins = placeToAdd.estimated_stay_mins || 60;
+    const departure = addMinutesToTime(arrival, stayMins);
+    const openCheck = checkPlaceOpenAtTime(
+      placeToAdd.opening_hours_json,
+      arrival,
+      departure
+    );
+
+    const newStop: ItineraryStop = {
+      stop_order: activePlan.stops.length + 1,
+      place: placeToAdd,
+      arrival_time: arrival,
+      departure_time: departure,
+      stay_mins: stayMins,
+      travel_mins_from_prev: travelMins,
+      distance_meters_from_prev: Math.round(distM),
+      is_open_at_arrival: openCheck.isOpen,
+      open_status_note: openCheck.note,
+      ai_reason: '🍽️ 由「現在想吃什麼」即時加入的順路美食站點',
+      alternatives: [],
+    };
+
+    const nextStops = [...activePlan.stops, newStop];
+    const nextPlan: ItineraryPlan = {
+      ...activePlan,
+      stops: nextStops,
+      total_distance_meters:
+        activePlan.total_distance_meters + Math.round(distM),
+      total_travel_mins: activePlan.total_travel_mins + travelMins,
+      total_duration_mins:
+        activePlan.total_duration_mins + travelMins + stayMins,
+      google_maps_nav_url: buildGoogleMapsDirUrl(
+        activePlan.origin,
+        nextStops.map((s) => s.place),
+        activePlan.travel_mode,
+        activePlan.end_anchor
+      ),
+    };
+
+    setPlans((prev) =>
+      prev.map((pl, idx) => (idx === activePlanIndex ? nextPlan : pl))
+    );
+  };
+
   return (
     <div className="space-y-5">
+      {/* ==================== 🍽️ 現在想吃什麼？（依目前行政區快速找吃） ==================== */}
+      <EatNowWidget
+        defaultCity={dest.city}
+        defaultDistrict={dest.district}
+        onAddPlaceToItinerary={handleAddEatNowPlace}
+      />
+
       {/* ==================== 對話窗 ＋ 旅程設定 ==================== */}
       <section className="rounded-3xl border-2 border-amber-400/80 bg-white p-4 sm:p-6 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
