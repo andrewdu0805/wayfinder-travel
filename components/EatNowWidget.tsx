@@ -45,8 +45,10 @@ const CRAVING_OPTIONS: CravingOption[] = [
   { id: 'bar', emoji: '🍸', label: '小酌', subLabel: '餐酒館・精釀・酒吧' },
 ];
 
-const DRINK_REGEX =
-  /飲料|手搖|奶茶|紅茶|綠茶|烏龍|茶飲|果汁|木瓜牛奶|咖啡|cafe|coffee|拿鐵|冰沙|豆漿|青茶|冬瓜茶|鮮奶茶|茶室|茶館|飲品|tea/i;
+const DRINK_NAME_REGEX =
+  /飲料|手搖|奶茶|紅茶|綠茶|烏龍|茶飲|果汁|木瓜牛奶|咖啡|cafe|coffee|拿鐵|冰沙|豆漿|青茶|冬瓜茶|鮮奶茶|茶室|茶館|飲茶|tea|boba/i;
+const DRINK_NOTE_REGEX =
+  /手搖|奶茶|紅茶|綠茶|烏龍茶|茶飲|果汁|木瓜牛奶|手沖咖啡|精品咖啡|咖啡館|冰滴咖啡|單品咖啡/i;
 const BBQ_REGEX =
   /燒烤|烤肉|燒肉|串燒|炭烤|居酒屋|烤雞|桶仔雞|甕仔雞|烤鴨|炭火|bbq|yakitori|poulet|izakaya|串炸/i;
 const SNACK_REGEX =
@@ -54,42 +56,44 @@ const SNACK_REGEX =
 
 function isFoodPlace(p: SavedPlace): boolean {
   if (p.visit_status === 'visited_skip') return false;
-  if (p.primary_category === 'restaurant') return true;
-  const hay = `${p.name} ${p.user_notes || ''}`;
-  return DRINK_REGEX.test(hay) || BBQ_REGEX.test(hay) || SNACK_REGEX.test(hay);
+  // Strictly respect the place's verified category from 地點清單:
+  // Never pull cultural landmarks (e.g. 蝸牛巷), museums, parks, or shopping into food!
+  return p.primary_category === 'restaurant';
 }
 
 function matchesCraving(p: SavedPlace, craving: CravingType): boolean {
   if (!isFoodPlace(p)) return false;
   if (craving === 'all') return true;
-  const hay = `${p.name} ${p.user_notes || ''} ${(p.custom_tags || []).join(' ')}`;
+  const nameText = p.name || '';
+  const notesText = p.user_notes || '';
 
+  if (craving === 'bar') {
+    return p.sub_category === 'bar';
+  }
   if (craving === 'drink') {
-    return DRINK_REGEX.test(hay);
+    // Exclude bars / bistros (which mention 酒精飲品 / 豐富飲品) from 飲料店
+    if (p.sub_category === 'bar') return false;
+    if (DRINK_NAME_REGEX.test(nameText)) return true;
+    return (
+      p.sub_category === 'snack_dessert' && DRINK_NOTE_REGEX.test(notesText)
+    );
   }
   if (craving === 'bbq') {
-    return BBQ_REGEX.test(hay);
-  }
-  if (craving === 'bar') {
+    if (BBQ_REGEX.test(nameText)) return true;
     return (
-      p.sub_category === 'bar' ||
-      /餐酒|酒吧|精釀|啤酒|調酒|bistro|\bbar\b|wine|beer/i.test(hay)
+      (p.sub_category === 'meal' || p.sub_category === 'bar') &&
+      BBQ_REGEX.test(notesText)
     );
   }
   if (craving === 'snack') {
-    return (
-      (p.sub_category === 'snack_dessert' && !DRINK_REGEX.test(p.name)) ||
-      SNACK_REGEX.test(hay)
-    );
+    if (p.sub_category === 'bar') return false;
+    if (DRINK_NAME_REGEX.test(nameText) && !SNACK_REGEX.test(nameText)) {
+      return false;
+    }
+    return p.sub_category === 'snack_dessert' || SNACK_REGEX.test(nameText);
   }
   if (craving === 'meal') {
-    return (
-      p.sub_category === 'meal' ||
-      (!DRINK_REGEX.test(p.name) &&
-        p.sub_category !== 'bar' &&
-        p.sub_category !== 'souvenir' &&
-        p.sub_category !== 'snack_dessert')
-    );
+    return p.sub_category === 'meal';
   }
   return true;
 }
