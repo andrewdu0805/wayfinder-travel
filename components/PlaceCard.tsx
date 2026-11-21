@@ -35,29 +35,148 @@ export function PlaceCard({ place }: PlaceCardProps) {
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState(place.user_notes || '');
   const [isEnrichingNote, setIsEnrichingNote] = useState(false);
+  const [syncedPatch, setSyncedPatch] = useState<Partial<SavedPlace> | null>(
+    null
+  );
+  const [syncSummaryList, setSyncSummaryList] = useState<string[]>([]);
 
   const handleFetchGoogleMapsSummary = async () => {
     setIsEnrichingNote(true);
+    setSyncSummaryList([]);
     try {
-      const res = await fetch('/api/enrich-notes', {
+      const res = await fetch('/api/smart-parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: place.name,
-          city: place.city,
-          district: place.district,
-          subCategory: place.sub_category,
-          address: place.formatted_address,
-          googleMapsUrl: place.google_maps_url,
-          latitude: place.latitude,
-          longitude: place.longitude,
+          batch: [
+            {
+              url: place.google_maps_url || '',
+              title: place.name,
+              note: '',
+              rowCoords:
+                place.latitude && place.longitude
+                  ? { lat: place.latitude, lng: place.longitude }
+                  : null,
+            },
+          ],
+          defaultCity: place.city || '台南市',
+          categoryConfigs,
           geminiApiKey: settings.geminiApiKey,
           googleMapsApiKey: settings.googleMapsApiKey,
         }),
       });
+
       const data = await res.json();
-      if (data.description) {
-        setNoteDraft(data.description);
+      const enriched: SavedPlace | undefined = data.places?.[0];
+
+      if (enriched) {
+        const isDefaultHours = (h?: SavedPlace['opening_hours_json']) =>
+          !h?.weekday_descriptions?.length ||
+          (h.weekday_descriptions.length === 1 &&
+            h.weekday_descriptions[0] === '每日 10:00–21:00');
+
+        const patch: Partial<SavedPlace> = {};
+        const changes: string[] = [];
+
+        // 1. 縣市與行政區
+        const nextCity = enriched.city || place.city;
+        const nextDist = enriched.district || place.district;
+        if (nextCity !== place.city || nextDist !== place.district) {
+          patch.city = nextCity;
+          patch.district = nextDist;
+          changes.push(`行政區：${place.city}・${place.district} → ${nextCity}・${nextDist}`);
+        }
+        if (enriched.country) patch.country = enriched.country;
+        if (
+          enriched.formatted_address &&
+          /[路街段巷弄號大道]/.test(enriched.formatted_address)
+        ) {
+          patch.formatted_address = enriched.formatted_address;
+        }
+        if (enriched.latitude && enriched.longitude) {
+          patch.latitude = enriched.latitude;
+          patch.longitude = enriched.longitude;
+        }
+        if (enriched.google_place_id) {
+          patch.google_place_id = enriched.google_place_id;
+        }
+
+        // 2. 分類（絕不將已明確分類的非正餐降級回正餐）
+        const shouldUpdateCat =
+          enriched.sub_category &&
+          enriched.sub_category !== place.sub_category &&
+          !(place.sub_category !== 'meal' && enriched.sub_category === 'meal');
+        if (shouldUpdateCat) {
+          patch.primary_category = enriched.primary_category;
+          patch.sub_category = enriched.sub_category;
+          patch.estimated_stay_mins =
+            enriched.estimated_stay_mins || place.estimated_stay_mins;
+          const oldLabel =
+            categoryConfigs.find((c) => c.sub_category === place.sub_category)
+              ?.sub_label || place.sub_category;
+          const newLabel =
+            categoryConfigs.find((c) => c.sub_category === enriched.sub_category)
+              ?.sub_label || enriched.sub_category;
+          changes.push(`分類：${oldLabel} → ${newLabel}`);
+        }
+
+        // 3. 營業時間（絕不以預設 10:00–21:00 覆蓋真實營業時間）
+        if (
+          enriched.opening_hours_json &&
+          (!isDefaultHours(enriched.opening_hours_json) ||
+            isDefaultHours(place.opening_hours_json))
+        ) {
+          const oldHr =
+            place.opening_hours_json?.weekday_descriptions?.[0] || '';
+          const newHr =
+            enriched.opening_hours_json.weekday_descriptions?.[0] || '';
+          patch.opening_hours_json = enriched.opening_hours_json;
+          if (newHr && newHr !== oldHr) {
+            changes.push(`營業時間：${newHr}`);
+          }
+        }
+
+        // 4. 店名與評分
+        if (enriched.name && enriched.name !== place.name) {
+          patch.name = enriched.name;
+          changes.push(`店名：${enriched.name}`);
+        }
+        if (typeof enriched.rating === 'number') {
+          patch.rating = enriched.rating;
+        }
+        if (enriched.business_status) {
+          patch.business_status = enriched.business_status;
+        }
+
+        // 5. 評論摘要
+        const nextSubForNote = patch.sub_category || place.sub_category;
+        const nextPrimaryForNote = patch.primary_category || place.primary_category;
+        let nextDesc = (enriched.user_notes || '').trim();
+        if (
+          !nextDesc ||
+          !/[\u4e00-\u9fff]/.test(nextDesc) ||
+          (nextPrimaryForNote !== 'restaurant' &&
+            nextDesc.includes('這家餐廳的餐點美味'))
+        ) {
+          nextDesc = resolvePlaceDescription(
+            patch.name || place.name,
+            nextCity,
+            nextDist,
+            nextSubForNote,
+            patch.formatted_address || place.formatted_address
+          );
+        }
+        if (nextDesc) {
+          setNoteDraft(nextDesc);
+          if (nextDesc !== (place.user_notes || '').trim()) {
+            changes.push('評論摘要已更新');
+          }
+        }
+
+        setSyncedPatch(Object.keys(patch).length > 0 ? patch : null);
+        setSyncSummaryList(
+          changes.length > 0 ? changes : ['資料皆已與 Google Maps 一致']
+        );
       }
     } catch {
       const freshDesc = resolvePlaceDescription(
@@ -68,6 +187,7 @@ export function PlaceCard({ place }: PlaceCardProps) {
         place.formatted_address
       );
       setNoteDraft(freshDesc);
+      setSyncSummaryList(['已套用本地評論摘要']);
     } finally {
       setIsEnrichingNote(false);
     }
@@ -307,7 +427,7 @@ export function PlaceCard({ place }: PlaceCardProps) {
               </button>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="block text-base font-extrabold text-stone-800">
                   店家必點推薦或心得備註：
@@ -316,13 +436,27 @@ export function PlaceCard({ place }: PlaceCardProps) {
                   type="button"
                   disabled={isEnrichingNote}
                   onClick={handleFetchGoogleMapsSummary}
-                  className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50 transition-colors cursor-pointer"
-                  title="依所在行政區重新套用 Google Maps 評論摘要"
+                  className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50 transition-colors cursor-pointer"
+                  title="依 Google Maps 網址同步修正行政區、分類、營業時間與評論摘要"
                 >
-                  <Sparkles className={`h-3 w-3 text-amber-600 ${isEnrichingNote ? 'animate-spin' : ''}`} />
-                  {isEnrichingNote ? '擷取摘要中...' : `重新套用 ${place.district} Google Maps 評論摘要`}
+                  <Sparkles className={`h-3.5 w-3.5 text-amber-600 ${isEnrichingNote ? 'animate-spin' : ''}`} />
+                  {isEnrichingNote
+                    ? '同步 Google Maps 資訊中...'
+                    : '同步 Google Maps（行政區／分類／營業時間／摘要）'}
                 </button>
               </div>
+
+              {syncSummaryList.length > 0 && (
+                <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-bold text-teal-900 space-y-0.5">
+                  <p className="text-teal-800">✨ 已依 Google Maps 網址偵測並準備套用：</p>
+                  <ul className="list-disc pl-4 space-y-0.5 font-medium">
+                    {syncSummaryList.map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <textarea
                 rows={5}
                 value={noteDraft}
@@ -336,7 +470,11 @@ export function PlaceCard({ place }: PlaceCardProps) {
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-stone-100">
               <button
                 type="button"
-                onClick={() => setIsNoteModalOpen(false)}
+                onClick={() => {
+                  setSyncedPatch(null);
+                  setSyncSummaryList([]);
+                  setIsNoteModalOpen(false);
+                }}
                 className="rounded-xl px-4 py-2 text-base font-bold text-stone-600 hover:bg-stone-100 cursor-pointer"
               >
                 取消
@@ -344,12 +482,17 @@ export function PlaceCard({ place }: PlaceCardProps) {
               <button
                 type="button"
                 onClick={() => {
-                  updatePlaceInline(place.id, { user_notes: noteDraft.trim() });
+                  updatePlaceInline(place.id, {
+                    ...(syncedPatch || {}),
+                    user_notes: noteDraft.trim(),
+                  });
+                  setSyncedPatch(null);
+                  setSyncSummaryList([]);
                   setIsNoteModalOpen(false);
                 }}
                 className="rounded-xl bg-amber-600 hover:bg-amber-700 px-5 py-2 text-base font-extrabold text-white shadow-md cursor-pointer"
               >
-                儲存說明
+                {syncedPatch ? '儲存說明並套用同步修正' : '儲存說明'}
               </button>
             </div>
           </div>
