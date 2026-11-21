@@ -1840,7 +1840,7 @@ export function inferPlaceCategoryByName(text: string): {
 
   // 4. Museums, Art Galleries, Cultural Parks & Exhibition Halls
   if (
-    /藝文中心|文化中心|藝術中心|文化園區|文創園區|文創園|文創特區|藝術特區|美術館|博物館|展覽館|展覽|藝術館|歷史館|鐵道館|糖廠|展演|故事館|紀念館|故宮|天文館|科博館|科學館|海洋館|水族館|museum|gallery|art center/.test(
+    /藝文中心|文化中心|藝術中心|藝術文化中心|音樂中心|演藝廳|音樂廳|歌劇院|劇院|文化園區|文創園區|文創園|文創特區|藝術特區|美術館|博物館|展覽館|展覽|藝術館|歷史館|鐵道館|糖廠|展演|故事館|紀念館|文物館|文學館|文化館|工藝館|故宮|天文館|科博館|科工館|科學館|海洋館|海生館|水族館|圖書館|駁二|衛武營|museum|gallery|art center/.test(
       lower
     )
   ) {
@@ -1851,9 +1851,9 @@ export function inferPlaceCategoryByName(text: string): {
     };
   }
 
-  // 5. Historic Landmarks, Temples, Heritage (CRITICAL: Do NOT match bare '堡' or '宮' which matches 漢堡 or 宮保!)
+  // 5. Historic Landmarks, Temples, Piers, Industrial Heritage (CRITICAL: Do NOT match bare '堡' or '宮' which matches 漢堡 or 宮保!)
   if (
-    /古蹟|歷史建築|紀念堂|宗祠|古厝|砲台|燈塔|城門|牌坊|神社|天后宮|城隍廟|關帝廟|文武廟|三清宮|佛寺|寺院|天主堂|大教堂|老街|地標|安平古堡|億載金城|紅毛城|赤崁樓|孔廟/.test(
+    /古蹟|歷史建築|磚窯|窯廠|酒廠|碼頭|漁港|港灣|書院|教堂|聖母|眷村|遺址|武德殿|出張所|領事館|洋行|別邸|逍遙園|忠烈祠|隧道|棧貳庫|大港橋|愛河灣|蓮池潭|龍虎塔|西子灣|紀念堂|宗祠|古厝|砲台|燈塔|城門|牌坊|神社|天后宮|城隍廟|關帝廟|文武廟|三清宮|佛寺|寺院|天主堂|大教堂|老街|古城|地標|安平古堡|億載金城|紅毛城|赤崁樓|孔廟/.test(
       lower
     )
   ) {
@@ -1875,7 +1875,7 @@ export function inferPlaceCategoryByName(text: string): {
 
   // 7. Nature Outdoors, Hiking Trails, Scenic Areas (CRITICAL: Do NOT match bare '山' which matches 鼓山, 鳳山, 岡山, 中山路!)
   if (
-    /登山步道|登山|步道|健行|步徑|林道|古道|森林公園|國家公園|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|海水浴場|海岸風景|觀景台|瞭望台|神木|露營區/.test(
+    /登山步道|登山|步道|健行|步徑|林道|古道|森林公園|國家公園|都會公園|河濱公園|濱海公園|植物園|濕地|生態園區|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|沙灘|海水浴場|海岸風景|觀景台|瞭望台|神木|露營區/.test(
       lower
     )
   ) {

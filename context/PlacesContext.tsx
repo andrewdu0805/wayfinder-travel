@@ -592,6 +592,59 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                   ? enriched.formatted_address
                   : p.formatted_address || enriched.formatted_address;
 
+                const isDefaultHours = (
+                  h?: SavedPlace['opening_hours_json']
+                ) =>
+                  !h?.weekday_descriptions?.length ||
+                  (h.weekday_descriptions.length === 1 &&
+                    h.weekday_descriptions[0] === '每日 10:00–21:00');
+                const nextHours =
+                  !isDefaultHours(enriched.opening_hours_json) ||
+                  isDefaultHours(p.opening_hours_json)
+                    ? enriched.opening_hours_json || p.opening_hours_json
+                    : p.opening_hours_json;
+
+                // Never downgrade a specific non-meal category back to generic 'meal'
+                const shouldKeepOrigCat =
+                  p.sub_category !== 'meal' && enriched.sub_category === 'meal';
+                const nextPrimary = shouldKeepOrigCat
+                  ? p.primary_category
+                  : enriched.primary_category || p.primary_category;
+                const nextSub = shouldKeepOrigCat
+                  ? p.sub_category
+                  : enriched.sub_category || p.sub_category;
+                const nextStay = shouldKeepOrigCat
+                  ? p.estimated_stay_mins
+                  : enriched.estimated_stay_mins || p.estimated_stay_mins;
+
+                const origNote = (p.user_notes || '').trim();
+                const enrichedNote = (enriched.user_notes || '').trim();
+                const isEnrichedGenericRestaurant =
+                  enrichedNote.includes(
+                    '顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食'
+                  ) ||
+                  (nextPrimary !== 'restaurant' &&
+                    enrichedNote.includes('這家餐廳的餐點美味'));
+                const isOrigBad =
+                  !origNote ||
+                  (origNote.length > 10 && !/[\u4e00-\u9fff]/.test(origNote)) ||
+                  origNote.includes('顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食') ||
+                  (nextPrimary !== 'restaurant' &&
+                    origNote.includes('這家餐廳的餐點美味'));
+
+                const nextNotes =
+                  isOrigBad && enrichedNote && !isEnrichedGenericRestaurant
+                    ? enrichedNote
+                    : isOrigBad
+                    ? resolvePlaceDescription(
+                        enriched.name || p.name,
+                        enriched.city || p.city,
+                        enriched.district || p.district,
+                        nextSub,
+                        nextAddr
+                      )
+                    : origNote;
+
                 return {
                   ...p,
                   name: enriched.name || p.name,
@@ -603,29 +656,14 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                   district: enriched.district || p.district,
                   latitude: enriched.latitude || p.latitude,
                   longitude: enriched.longitude || p.longitude,
-                  primary_category: enriched.primary_category || p.primary_category,
-                  sub_category: enriched.sub_category || p.sub_category,
-                  estimated_stay_mins:
-                    enriched.estimated_stay_mins || p.estimated_stay_mins,
+                  primary_category: nextPrimary,
+                  sub_category: nextSub,
+                  estimated_stay_mins: nextStay,
                   rating: enriched.rating ?? p.rating,
                   business_status:
                     enriched.business_status || p.business_status,
-                  opening_hours_json:
-                    enriched.opening_hours_json || p.opening_hours_json,
-                  user_notes:
-                    enriched.user_notes &&
-                    enriched.user_notes !== '由 CSV 清單匯入' &&
-                    enriched.user_notes !== '由 Google Takeout 匯入' &&
-                    enriched.user_notes !== '透過智慧快速輸入新增'
-                      ? enriched.user_notes
-                      : p.user_notes ||
-                        resolvePlaceDescription(
-                          p.name,
-                          enriched.city || p.city,
-                          enriched.district || p.district,
-                          enriched.sub_category || p.sub_category,
-                          nextAddr
-                        ),
+                  opening_hours_json: nextHours,
+                  user_notes: nextNotes,
                 };
               };
               setPlaces((prev) =>
@@ -1120,15 +1158,58 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                   ? enriched.formatted_address
                   : orig.formatted_address || enriched.formatted_address;
 
-                const nextPrimary = enriched.primary_category || orig.primary_category;
-                const nextSub = enriched.sub_category || orig.sub_category;
-                const nextStay = enriched.estimated_stay_mins || orig.estimated_stay_mins;
-                const nextHours = enriched.opening_hours_json || orig.opening_hours_json;
+                const isDefaultHours = (
+                  h?: SavedPlace['opening_hours_json']
+                ) =>
+                  !h?.weekday_descriptions?.length ||
+                  (h.weekday_descriptions.length === 1 &&
+                    h.weekday_descriptions[0] === '每日 10:00–21:00');
+
+                // Never downgrade a specific non-meal category (landmark/museum/bar/trail/etc.) back to generic 'meal'!
+                const inferredFromName = inferPlaceCategoryByName(nextName);
+                let nextPrimary = orig.primary_category;
+                let nextSub = orig.sub_category;
+                let nextStay = orig.estimated_stay_mins;
+
+                if (enriched.sub_category && enriched.sub_category !== 'meal') {
+                  nextPrimary = enriched.primary_category || orig.primary_category;
+                  nextSub = enriched.sub_category;
+                  nextStay = enriched.estimated_stay_mins || orig.estimated_stay_mins;
+                } else if (
+                  orig.sub_category === 'meal' &&
+                  inferredFromName.sub_category !== 'meal'
+                ) {
+                  nextPrimary = inferredFromName.primary_category;
+                  nextSub = inferredFromName.sub_category;
+                  const cfg = categoryConfigs.find(
+                    (c) => c.sub_category === inferredFromName.sub_category
+                  );
+                  nextStay =
+                    cfg?.default_stay_mins ?? inferredFromName.estimated_stay_mins;
+                }
+
+                // Never overwrite real opening hours (e.g. 星期一: 休息, 24 小時營業) with fallback '每日 10:00–21:00'
+                const nextHours =
+                  !isDefaultHours(enriched.opening_hours_json) ||
+                  isDefaultHours(orig.opening_hours_json)
+                    ? enriched.opening_hours_json || orig.opening_hours_json
+                    : orig.opening_hours_json;
 
                 // Determine if original note should be replaced (English, empty, generic, mismatched category, or cross-district)
                 const origNote = (orig.user_notes || '').trim();
+                const enrichedNote = (enriched.user_notes || '').trim();
                 const isEnglishNote =
                   origNote.length > 10 && !/[\u4e00-\u9fff]/.test(origNote);
+                const isEnrichedBadFallback =
+                  !enrichedNote ||
+                  (enrichedNote.length > 10 &&
+                    !/[\u4e00-\u9fff]/.test(enrichedNote)) ||
+                  enrichedNote.includes(
+                    '顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食'
+                  ) ||
+                  (nextPrimary !== 'restaurant' &&
+                    enrichedNote.includes('這家餐廳的餐點美味'));
+
                 const isGenericOrBadNote =
                   !origNote ||
                   isEnglishNote ||
@@ -1148,18 +1229,17 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                   (nextDist !== '中西區' && origNote.includes('國華街')) ||
                   (nextDist !== '中西區' && origNote.includes('保安路'));
 
-                const nextNotes =
-                  isGenericOrBadNote && enriched.user_notes
-                    ? enriched.user_notes
-                    : origNote ||
-                      enriched.user_notes ||
-                      resolvePlaceDescription(
+                const nextNotes = isGenericOrBadNote
+                  ? !isEnrichedBadFallback
+                    ? enrichedNote
+                    : resolvePlaceDescription(
                         nextName,
                         nextCity,
                         nextDist,
                         nextSub,
                         nextAddr
-                      );
+                      )
+                  : origNote;
 
                 const changes: string[] = [];
                 if (nextCity !== orig.city || nextDist !== orig.district) {
@@ -1238,7 +1318,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         }
 
         try {
-          localStorage.setItem('antigravity_places_audit_v3', new Date().toISOString());
+          localStorage.setItem('antigravity_places_audit_v4', new Date().toISOString());
         } catch {}
 
         setAuditProgress({
@@ -1267,7 +1347,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      const alreadyAudited = localStorage.getItem('antigravity_places_audit_v3');
+      const alreadyAudited = localStorage.getItem('antigravity_places_audit_v4');
       if (alreadyAudited) return;
     } catch {
       return;
