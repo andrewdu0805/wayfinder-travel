@@ -33,9 +33,11 @@ export function PlaceCard({ place }: PlaceCardProps) {
   } = usePlaces();
 
   const [isSyncingCard, setIsSyncingCard] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
   const handleSyncFromGoogleMaps = async () => {
     setIsSyncingCard(true);
+    setSyncFeedback(null);
     try {
       const res = await fetch('/api/smart-parse', {
         method: 'POST',
@@ -60,7 +62,8 @@ export function PlaceCard({ place }: PlaceCardProps) {
       });
 
       const data = await res.json();
-      const enriched: SavedPlace | undefined = data.places?.[0];
+      const enriched: (SavedPlace & { _syncDiagnostic?: string }) | undefined =
+        data.places?.[0];
 
       if (enriched) {
         const isDefaultHours = (h?: SavedPlace['opening_hours_json']) =>
@@ -120,9 +123,15 @@ export function PlaceCard({ place }: PlaceCardProps) {
         if (Object.keys(patch).length > 0) {
           updatePlaceInline(place.id, patch);
         }
+
+        setSyncFeedback(
+          enriched._syncDiagnostic || '✅ 已完成 Google Maps 資訊同步'
+        );
+      } else {
+        setSyncFeedback('⚠️ 查無對應 Google Maps 地點');
       }
     } catch {
-      // ignore network error
+      setSyncFeedback('⚠️ 同步連線逾時，請稍後再試');
     } finally {
       setIsSyncingCard(false);
     }
@@ -293,6 +302,18 @@ export function PlaceCard({ place }: PlaceCardProps) {
               <span>{isSyncingCard ? '同步中...' : '同步地圖資訊'}</span>
             </button>
           </div>
+
+          {syncFeedback && (
+            <p
+              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg ${
+                syncFeedback.startsWith('✅')
+                  ? 'bg-teal-50 text-teal-800 border border-teal-200'
+                  : 'bg-amber-50 text-amber-900 border border-amber-200'
+              }`}
+            >
+              {syncFeedback}
+            </p>
+          )}
         </div>
 
         {/* 第四排：三大造訪狀態大按鈕 */}

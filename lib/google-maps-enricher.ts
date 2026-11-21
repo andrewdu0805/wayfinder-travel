@@ -576,6 +576,10 @@ export async function enrichPlaceFromGoogleMapsUrl(
   let gotOfficialDistrict = false;
 
   // Step 2: Google Places API (New) — Official Google Maps Data anchored to URL coords!
+  if (!hasValidMapsKey) {
+    (next as SavedPlace & { _syncDiagnostic?: string })._syncDiagnostic =
+      '⚠️ 後端與設定皆未偵測到 Google Maps API Key（請確認 ⚙️ 設定或 Vercel 環境變數 GOOGLE_MAPS_API_KEY）';
+  }
   if (hasValidMapsKey) {
     try {
       // Do NOT include potentially-wrong old district in textQuery; rely on city + exact URL locationBias!
@@ -596,25 +600,15 @@ export async function enrichPlaceFromGoogleMapsUrl(
       const extendedMask =
         'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews';
       const safeCoreMask =
-        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.currentOpeningHours,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.editorialSummary,places.reviews';
+        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.primaryType,places.types,places.editorialSummary';
+      const minimalMask =
+        'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.types';
 
-      let placesRes = await fetch(
-        'https://places.googleapis.com/v1/places:searchText',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': googleMapsApiKey!,
-            'X-Goog-FieldMask': extendedMask,
-          },
-          body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(5000),
-        }
-      );
+      const tryMasks = [extendedMask, safeCoreMask, minimalMask];
+      let placesRes: Response | null = null;
+      let lastErrStatus = '';
 
-      // Resilient retry: if extended AI summary fields fail on this API key/SKU (HTTP 400/403),
-      // immediately retry with the guaranteed-valid core FieldMask so we NEVER lose real hours/category/address!
-      if (!placesRes.ok) {
+      for (const mask of tryMasks) {
         placesRes = await fetch(
           'https://places.googleapis.com/v1/places:searchText',
           {
@@ -622,15 +616,32 @@ export async function enrichPlaceFromGoogleMapsUrl(
             headers: {
               'Content-Type': 'application/json',
               'X-Goog-Api-Key': googleMapsApiKey!,
-              'X-Goog-FieldMask': safeCoreMask,
+              'X-Goog-FieldMask': mask,
             },
             body: JSON.stringify(requestBody),
             signal: AbortSignal.timeout(5000),
           }
         );
+        if (placesRes.ok) break;
+        lastErrStatus = `HTTP ${placesRes.status}`;
+        // If 403 (API key / permission issue), retrying another mask won't help
+        if (placesRes.status === 403 || placesRes.status === 401) break;
       }
 
-      if (placesRes.ok) {
+      if (placesRes && !placesRes.ok) {
+        let errDetail = lastErrStatus;
+        try {
+          const errJson = await placesRes.json();
+          if (errJson?.error?.message) {
+            errDetail = `${lastErrStatus}: ${String(errJson.error.message).slice(0, 80)}`;
+          }
+        } catch {}
+        console.warn('Google Places API failed:', errDetail);
+        (next as SavedPlace & { _syncDiagnostic?: string })._syncDiagnostic =
+          `Google Places API 連線失敗（${errDetail}）`;
+      }
+
+      if (placesRes && placesRes.ok) {
         const data = await placesRes.json();
         const top = data.places?.[0];
         if (top) {
@@ -736,6 +747,11 @@ export async function enrichPlaceFromGoogleMapsUrl(
             if (parsedHours) {
               next.opening_hours_json = parsedHours;
               gotOfficialHours = true;
+              (next as SavedPlace & { _syncDiagnostic?: string })._syncDiagnostic =
+                '✅ 已從 Google Maps 同步最新資訊與營業時間';
+            } else {
+              (next as SavedPlace & { _syncDiagnostic?: string })._syncDiagnostic =
+                '✅ 已連線 Google Maps（此地點於 Google 未登錄固定營業時間）';
             }
 
             // Official Google Maps Review Summary (only overwrite if user didn't supply a custom note)
