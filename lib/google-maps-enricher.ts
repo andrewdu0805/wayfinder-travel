@@ -841,11 +841,16 @@ export async function enrichPlaceFromGoogleMapsUrl(
         const bdcCity = String(bdc.principalSubdivision || bdc.city || '')
           .replace('臺', '台')
           .trim();
-        const bdcDist = String(bdc.locality || '').trim();
+        const bdcDist = String(bdc.locality || '').replace('臺', '台').trim();
         if (bdcCity && /[市縣]$/.test(bdcCity)) {
           next.city = bdcCity;
         }
-        if (bdcDist && /[區市鎮鄉]$/.test(bdcDist)) {
+        if (
+          bdcDist &&
+          /[區市鎮鄉]$/.test(bdcDist) &&
+          bdcDist !== next.city &&
+          bdcDist !== bdcCity
+        ) {
           next.district = bdcDist;
           gotOfficialDistrict = true;
           if (!/[路街段巷弄號大道]/.test(next.formatted_address || '')) {

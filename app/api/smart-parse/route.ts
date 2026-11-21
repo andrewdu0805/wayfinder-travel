@@ -1199,11 +1199,16 @@ ${resolvedInput}`,
             )
               .replace('臺', '台')
               .trim();
-            const bdcDist = String(bdc.locality || '').trim();
+            const bdcDist = String(bdc.locality || '').replace('臺', '台').trim();
             if (bdcCity && /[市縣]$/.test(bdcCity)) {
               region.city = bdcCity;
             }
-            if (bdcDist && /[區市鎮鄉]$/.test(bdcDist)) {
+            if (
+              bdcDist &&
+              /[區市鎮鄉]$/.test(bdcDist) &&
+              bdcDist !== region.city &&
+              bdcDist !== bdcCity
+            ) {
               region.district = bdcDist;
             }
           }

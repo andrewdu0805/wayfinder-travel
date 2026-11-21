@@ -20,6 +20,7 @@ import {
   INITIAL_SAVED_PLACES,
 } from '@/lib/default-data';
 import {
+  ALL_TAIWAN_CITY_DISTRICTS,
   cleanStoreName,
   extractCoordsFromGoogleMapsUrl,
   extractRegionFromAddress,
@@ -181,6 +182,17 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
   if (reg.city && reg.district) {
     nextCity = reg.city;
     nextDist = reg.district;
+  }
+
+  // Self-heal invalid district === city (e.g. 桃園市・桃園市 -> 桃園市・桃園區)
+  if (nextDist && nextCity && nextDist === nextCity) {
+    const validDists = ALL_TAIWAN_CITY_DISTRICTS[nextCity] || [];
+    nextDist =
+      validDists[0] ||
+      (nextCity.endsWith('市') ? nextCity.replace(/市$/, '區') : nextDist);
+    if (nextAddr.includes(`${nextCity}${nextCity}`)) {
+      nextAddr = nextAddr.replace(`${nextCity}${nextCity}`, `${nextCity}${nextDist}`);
+    }
   }
 
   if (isImportedRecord && isPlaceholderAddr) {

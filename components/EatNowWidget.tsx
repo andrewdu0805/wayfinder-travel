@@ -136,9 +136,11 @@ export function EatNowWidget({
   const availableDistricts = useMemo(() => {
     const base = ALL_TAIWAN_CITY_DISTRICTS[city] || [];
     const fromPlaces = places
-      .filter((p) => p.city === city && p.district)
+      .filter((p) => p.city === city && p.district && p.district !== city)
       .map((p) => p.district);
-    return Array.from(new Set([...base, ...fromPlaces]));
+    return Array.from(new Set([...base, ...fromPlaces])).filter(
+      (d) => d !== city
+    );
   }, [city, places]);
 
   // GPS locate user's exact current city & district via polygon reverse geocoding
@@ -169,9 +171,15 @@ export function EatNowWidget({
             const bdcCity = String(bdc.principalSubdivision || bdc.city || '')
               .replace('臺', '台')
               .trim();
-            const bdcDist = String(bdc.locality || '').trim();
+            const bdcDist = String(bdc.locality || '').replace('臺', '台').trim();
             if (bdcCity && /[市縣]$/.test(bdcCity)) resolvedCity = bdcCity;
-            if (bdcDist && /[區市鎮鄉]$/.test(bdcDist)) resolvedDist = bdcDist;
+            if (
+              bdcDist &&
+              /[區市鎮鄉]$/.test(bdcDist) &&
+              bdcDist !== bdcCity
+            ) {
+              resolvedDist = bdcDist;
+            }
           }
         } catch {
           // fallback below

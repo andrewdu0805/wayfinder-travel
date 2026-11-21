@@ -223,9 +223,12 @@ export function PlaceCard({ place }: PlaceCardProps) {
       : '營業時間依現場公告');
 
   const cityDistricts = CITY_DISTRICTS_MAP[place.city] || [];
-  const availableDistricts = cityDistricts.includes(place.district)
-    ? cityDistricts
-    : [place.district, ...cityDistricts];
+  const availableDistricts =
+    !place.district ||
+    place.district === place.city ||
+    cityDistricts.includes(place.district)
+      ? cityDistricts
+      : [place.district, ...cityDistricts];
 
   return (
     <>
