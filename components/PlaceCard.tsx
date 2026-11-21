@@ -34,6 +34,12 @@ export function PlaceCard({ place }: PlaceCardProps) {
 
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState(place.user_notes || '');
+  const [hoursDraft, setHoursDraft] = useState(
+    place.opening_hours_json?.weekday_descriptions?.[0] ||
+      (place.opening_hours_json?.daily_hours
+        ? `每日 ${place.opening_hours_json.daily_hours.open}–${place.opening_hours_json.daily_hours.close}`
+        : '')
+  );
   const [isEnrichingNote, setIsEnrichingNote] = useState(false);
   const [syncedPatch, setSyncedPatch] = useState<Partial<SavedPlace> | null>(
     null
@@ -130,9 +136,18 @@ export function PlaceCard({ place }: PlaceCardProps) {
             place.opening_hours_json?.weekday_descriptions?.[0] || '';
           const newHr =
             enriched.opening_hours_json.weekday_descriptions?.[0] || '';
-          patch.opening_hours_json = enriched.opening_hours_json;
-          if (newHr && newHr !== oldHr) {
-            changes.push(`營業時間：${newHr}`);
+          if (!isDefaultHours(enriched.opening_hours_json)) {
+            patch.opening_hours_json = enriched.opening_hours_json;
+            const todayIdx = (new Date().getDay() + 6) % 7;
+            const displayHr =
+              enriched.opening_hours_json.weekday_descriptions?.[todayIdx] ||
+              newHr;
+            setHoursDraft(displayHr);
+            if (newHr && newHr !== oldHr) {
+              changes.push(`營業時間：${displayHr}`);
+            }
+          } else if (!settings.googleMapsApiKey && !settings.geminiApiKey) {
+            changes.push('⚠️ 營業時間未更新（尚未於設定填入 Google Maps 或 Gemini API Key）');
           }
         }
 
@@ -197,8 +212,12 @@ export function PlaceCard({ place }: PlaceCardProps) {
     (c) => c.sub_category === place.sub_category
   );
 
+  const weekdayList = place.opening_hours_json?.weekday_descriptions || [];
+  const primaryWeekdayDesc =
+    weekdayList.find((d) => d && !/休息|公休|Closed/i.test(d)) ||
+    weekdayList[0];
   const hoursText =
-    place.opening_hours_json?.weekday_descriptions?.[0] ||
+    primaryWeekdayDesc ||
     (place.opening_hours_json?.daily_hours
       ? `每日 ${place.opening_hours_json.daily_hours.open}–${place.opening_hours_json.daily_hours.close}`
       : '營業時間依現場公告');
@@ -465,6 +484,19 @@ export function PlaceCard({ place }: PlaceCardProps) {
                 placeholder="例如：牛肉新鮮軟嫩，點牛肉湯可無限續湯並免費享用美味牛肉燥飯..."
                 autoFocus
               />
+
+              <div className="space-y-1 pt-1">
+                <label className="block text-sm font-extrabold text-stone-700">
+                  🕒 營業時間（同步 Google Maps 或手動微調）：
+                </label>
+                <input
+                  type="text"
+                  value={hoursDraft}
+                  onChange={(e) => setHoursDraft(e.target.value)}
+                  placeholder="例如：週二至週日 11:00–21:00（週一公休）或 24 小時營業"
+                  className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-900 focus:border-amber-600 focus:bg-white focus:outline-none"
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-stone-100">
@@ -482,8 +514,31 @@ export function PlaceCard({ place }: PlaceCardProps) {
               <button
                 type="button"
                 onClick={() => {
+                  const trimmedHours = hoursDraft.trim();
+                  let finalHours = syncedPatch?.opening_hours_json;
+                  if (!finalHours && trimmedHours && trimmedHours !== hoursText) {
+                    const tm = trimmedHours.match(
+                      /(\d{1,2}):(\d{2})\s*[–\-~至到]\s*(\d{1,2}):(\d{2})/
+                    );
+                    finalHours = {
+                      open_now: true,
+                      weekday_descriptions: [trimmedHours],
+                      daily_hours: /24\s*小時/.test(trimmedHours)
+                        ? { open: '00:00', close: '23:59' }
+                        : tm
+                        ? {
+                            open: `${tm[1].padStart(2, '0')}:${tm[2]}`,
+                            close: `${tm[3].padStart(2, '0')}:${tm[4]}`,
+                          }
+                        : place.opening_hours_json?.daily_hours || {
+                            open: '10:00',
+                            close: '21:00',
+                          },
+                    };
+                  }
                   updatePlaceInline(place.id, {
                     ...(syncedPatch || {}),
+                    ...(finalHours ? { opening_hours_json: finalHours } : {}),
                     user_notes: noteDraft.trim(),
                   });
                   setSyncedPatch(null);

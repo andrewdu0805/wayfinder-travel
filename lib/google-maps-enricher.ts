@@ -594,9 +594,9 @@ export async function enrichPlaceFromGoogleMapsUrl(
       }
 
       const extendedMask =
-        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews';
+        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews';
       const safeCoreMask =
-        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.editorialSummary,places.reviews';
+        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.currentOpeningHours,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.editorialSummary,places.reviews';
 
       let placesRes = await fetch(
         'https://places.googleapis.com/v1/places:searchText',
@@ -634,7 +634,12 @@ export async function enrichPlaceFromGoogleMapsUrl(
         const data = await placesRes.json();
         const top = data.places?.[0];
         if (top) {
-          // Strict coordinate guard: reject if Google Places returned a branch > 4km away from URL pin
+          // Only enforce strict 4km guard if URL actually had exact pin coordinates;
+          // otherwise allow up to 25km so rough district centroids never reject the real Google Maps venue!
+          const hadExactUrlCoords = Boolean(
+            extractCoordsFromGoogleMapsUrl(basePlace.google_maps_url || '')
+          );
+          const maxAllowedDistM = hadExactUrlCoords ? 5000 : 25000;
           let isDrifted = false;
           if (
             next.latitude &&
@@ -648,7 +653,7 @@ export async function enrichPlaceFromGoogleMapsUrl(
               top.location.latitude,
               top.location.longitude
             );
-            if (distM > 4000) {
+            if (distM > maxAllowedDistM) {
               isDrifted = true;
             }
           }
@@ -724,8 +729,10 @@ export async function enrichPlaceFromGoogleMapsUrl(
               gotOfficialCategory = true;
             }
 
-            // Official Google Maps Opening Hours
-            const parsedHours = parseGoogleOpeningHours(top.regularOpeningHours);
+            // Official Google Maps Opening Hours (check both regularOpeningHours and currentOpeningHours)
+            const parsedHours = parseGoogleOpeningHours(
+              top.regularOpeningHours || top.currentOpeningHours
+            );
             if (parsedHours) {
               next.opening_hours_json = parsedHours;
               gotOfficialHours = true;
@@ -956,25 +963,47 @@ export async function enrichPlaceFromGoogleMapsUrl(
           next.formatted_address = parsed.formatted_address.trim();
         }
 
-        if (
-          !gotOfficialHours &&
-          parsed.open_time &&
-          parsed.close_time &&
-          /^\d{2}:\d{2}$/.test(parsed.open_time) &&
-          /^\d{2}:\d{2}$/.test(parsed.close_time)
-        ) {
-          next.opening_hours_json = {
-            open_now: true,
-            weekday_descriptions: [
-              parsed.weekday_description?.trim() ||
-                `每日 ${parsed.open_time}–${parsed.close_time}`,
-            ],
-            daily_hours: {
-              open: parsed.open_time,
-              close: parsed.close_time,
-            },
+        if (!gotOfficialHours) {
+          const wdText = (parsed.weekday_description || '').trim();
+          let openNorm = '';
+          let closeNorm = '';
+
+          const normTime = (raw?: string): string => {
+            if (!raw) return '';
+            const m = raw.trim().match(/^(\d{1,2}):(\d{2})$/);
+            if (!m) return '';
+            return `${pad2(parseInt(m[1], 10))}:${m[2]}`;
           };
-          gotOfficialHours = true;
+
+          openNorm = normTime(parsed.open_time);
+          closeNorm = normTime(parsed.close_time);
+
+          if (/24\s*小時|全天開放/i.test(wdText)) {
+            openNorm = '00:00';
+            closeNorm = '23:59';
+          } else if ((!openNorm || !closeNorm) && wdText) {
+            const tm = wdText.match(
+              /(\d{1,2}):(\d{2})\s*[–\-~至到]\s*(\d{1,2}):(\d{2})/
+            );
+            if (tm) {
+              openNorm = `${pad2(parseInt(tm[1], 10))}:${tm[2]}`;
+              closeNorm = `${pad2(parseInt(tm[3], 10))}:${tm[4]}`;
+            }
+          }
+
+          if (wdText || (openNorm && closeNorm)) {
+            next.opening_hours_json = {
+              open_now: true,
+              weekday_descriptions: [
+                wdText || `每日 ${openNorm}–${closeNorm}`,
+              ],
+              daily_hours:
+                openNorm && closeNorm
+                  ? { open: openNorm, close: closeNorm }
+                  : { open: '10:00', close: '21:00' },
+            };
+            gotOfficialHours = true;
+          }
         }
 
         if (
