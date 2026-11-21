@@ -710,11 +710,6 @@ export function RouteVisualizerMap({
                 <h4 className="text-sm sm:text-base font-black text-white truncate">
                   {selectedPlace.name}
                 </h4>
-                {selectedPlace.user_notes && (
-                  <p className="text-stone-300 text-xs line-clamp-1">
-                    📝 {selectedPlace.user_notes}
-                  </p>
-                )}
               </div>
               <button
                 type="button"

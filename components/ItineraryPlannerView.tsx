@@ -1440,11 +1440,6 @@ export function ItineraryPlannerView() {
                     <h3 className="text-xl sm:text-2xl font-extrabold text-stone-900">
                       {stop.place.name}
                     </h3>
-                    {stop.place.user_notes && (
-                      <p className="text-base text-stone-600 mt-1 font-medium">
-                        📝 {stop.place.user_notes}
-                      </p>
-                    )}
                   </div>
 
                   <div className="rounded-xl bg-amber-50/70 border border-amber-200/80 px-4 py-2.5 text-base font-bold text-stone-800">

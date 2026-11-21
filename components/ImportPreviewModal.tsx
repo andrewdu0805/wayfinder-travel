@@ -537,15 +537,6 @@ export function ImportPreviewModal({
                         )}
                       </select>
 
-                      {/* User Notes / Google Maps Highlights */}
-                      {p.user_notes && (
-                        <span
-                          className="text-stone-600 truncate max-w-[280px] sm:max-w-md text-xs font-medium"
-                          title={p.user_notes}
-                        >
-                          📝 {p.user_notes}
-                        </span>
-                      )}
                     </div>
 
                     {/* Address & Opening Hours */}

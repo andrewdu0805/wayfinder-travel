@@ -327,12 +327,6 @@ export function EatNowWidget({
             )}
           </div>
 
-          {p.user_notes && (
-            <p className="text-xs font-medium text-stone-600 line-clamp-2 leading-relaxed">
-              {p.user_notes}
-            </p>
-          )}
-
           {hoursLabel && (
             <p className="inline-flex items-center gap-1 text-[11px] font-bold text-stone-500">
               <Clock className="h-3 w-3 text-amber-600 shrink-0" />
