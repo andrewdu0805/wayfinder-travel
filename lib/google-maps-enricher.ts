@@ -177,6 +177,19 @@ export function mapGoogleCategoryToAppCategory(
     'historical_place',
     'plaza',
     'observation_deck',
+    'marina',
+    'pier',
+    'harbor',
+  ];
+  const shoppingMarketTypes = [
+    'market',
+    'farmers_market',
+    'night_market',
+    'shopping_mall',
+    'department_store',
+    'book_store',
+    'store',
+    'supermarket',
   ];
   const trailTypes = [
     'hiking_area',
@@ -190,6 +203,7 @@ export function mapGoogleCategoryToAppCategory(
     'wildlife_park',
     'scenic_spot',
     'garden',
+    'farm',
   ];
   const souvenirTypes = ['gift_shop', 'souvenir_store'];
   const snackDessertTypes = [
@@ -226,6 +240,9 @@ export function mapGoogleCategoryToAppCategory(
   } else if (souvenirTypes.includes(pt)) {
     primary = 'restaurant';
     sub = 'souvenir';
+  } else if (shoppingMarketTypes.includes(pt)) {
+    primary = 'shopping';
+    sub = 'other';
   } else if (snackDessertTypes.includes(pt)) {
     primary = 'restaurant';
     sub = 'snack_dessert';
@@ -250,8 +267,11 @@ export function mapGoogleCategoryToAppCategory(
       primary = 'restaurant';
       sub = 'meal';
     }
-  } else if (pt === 'tourist_attraction') {
-    if (museumTypes.some((t) => allTypes.has(t))) {
+  } else if (pt === 'tourist_attraction' || pt === 'point_of_interest') {
+    if (
+      museumTypes.some((t) => allTypes.has(t)) ||
+      /館|中心|園區|工場|工廠|劇院|博/.test(nameLower)
+    ) {
       primary = 'museum_culture';
       sub = 'museum';
     } else if (trailTypes.some((t) => allTypes.has(t))) {
@@ -269,19 +289,24 @@ export function mapGoogleCategoryToAppCategory(
       primary = 'restaurant';
       sub = 'bar';
     } else if (
-      /博物館|美術館|藝術中心|文化中心|表演藝術|音樂廳|劇院|戲院|展覽館|故事館|科學館|圖書館|藝廊/.test(
+      /博物館|美術館|藝術中心|文化中心|表演藝術|音樂廳|劇院|戲院|展覽館|故事館|科學館|圖書館|藝廊|觀光工廠|文創館|展示館/.test(
         label
       )
     ) {
       primary = 'museum_culture';
       sub = 'museum';
     } else if (
-      /歷史地標|古蹟|旅遊景點|觀光景點|廟宇|寺廟|教堂|書院|老街|紀念碑|城堡|砲台|燈塔|歷史建築|地標/.test(
+      /歷史地標|古蹟|旅遊景點|觀光景點|廟宇|寺廟|教堂|書院|老街|紀念碑|城堡|砲台|燈塔|歷史建築|地標|漁港|碼頭|港灣|漁村|景點/.test(
         label
       )
     ) {
       primary = 'museum_culture';
       sub = 'landmark';
+    } else if (
+      /夜市|市集|市場|魚市|商圈|購物中心|百貨|商場|書店|選物/.test(label)
+    ) {
+      primary = 'shopping';
+      sub = 'other';
     } else if (
       /公園|國家公園|登山步道|步道|海灘|風景區|自然|植物園|農場|牧場|觀景台|濕地/.test(
         label
@@ -331,9 +356,15 @@ export function mapGoogleCategoryToAppCategory(
     } else if (souvenirTypes.some((t) => allTypes.has(t))) {
       primary = 'restaurant';
       sub = 'souvenir';
+    } else if (shoppingMarketTypes.some((t) => allTypes.has(t))) {
+      primary = 'shopping';
+      sub = 'other';
     } else if (snackDessertTypes.some((t) => allTypes.has(t))) {
       primary = 'restaurant';
       sub = 'snack_dessert';
+    } else if (allTypes.has('tourist_attraction')) {
+      primary = 'museum_culture';
+      sub = 'landmark';
     } else if (allTypes.has('restaurant') || allTypes.has('food')) {
       primary = 'restaurant';
       sub = 'meal';
@@ -547,7 +578,8 @@ export async function enrichPlaceFromGoogleMapsUrl(
   // Step 2: Google Places API (New) — Official Google Maps Data anchored to URL coords!
   if (hasValidMapsKey) {
     try {
-      const textQuery = `${next.name} ${next.city} ${next.district}`.trim();
+      // Do NOT include potentially-wrong old district in textQuery; rely on city + exact URL locationBias!
+      const textQuery = `${next.name} ${next.city}`.trim();
       const requestBody: Record<string, unknown> = {
         textQuery,
         languageCode: 'zh-TW',
@@ -556,25 +588,47 @@ export async function enrichPlaceFromGoogleMapsUrl(
         requestBody.locationBias = {
           circle: {
             center: { latitude: next.latitude, longitude: next.longitude },
-            radius: 1500.0,
+            radius: 2500.0,
           },
         };
       }
 
-      const placesRes = await fetch(
+      const extendedMask =
+        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews';
+      const safeCoreMask =
+        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.editorialSummary,places.reviews';
+
+      let placesRes = await fetch(
         'https://places.googleapis.com/v1/places:searchText',
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': googleMapsApiKey!,
-            'X-Goog-FieldMask':
-              'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews',
+            'X-Goog-FieldMask': extendedMask,
           },
           body: JSON.stringify(requestBody),
           signal: AbortSignal.timeout(5000),
         }
       );
+
+      // Resilient retry: if extended AI summary fields fail on this API key/SKU (HTTP 400/403),
+      // immediately retry with the guaranteed-valid core FieldMask so we NEVER lose real hours/category/address!
+      if (!placesRes.ok) {
+        placesRes = await fetch(
+          'https://places.googleapis.com/v1/places:searchText',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': googleMapsApiKey!,
+              'X-Goog-FieldMask': safeCoreMask,
+            },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(5000),
+          }
+        );
+      }
 
       if (placesRes.ok) {
         const data = await placesRes.json();

@@ -1186,6 +1186,20 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                   );
                   nextStay =
                     cfg?.default_stay_mins ?? inferredFromName.estimated_stay_mins;
+                } else if (
+                  orig.sub_category === 'meal' &&
+                  (orig.user_notes || '').includes('參觀者表示')
+                ) {
+                  nextPrimary = 'museum_culture';
+                  nextSub = 'museum';
+                  nextStay = 110;
+                } else if (
+                  orig.sub_category === 'meal' &&
+                  (orig.user_notes || '').includes('遊客表示')
+                ) {
+                  nextPrimary = 'museum_culture';
+                  nextSub = 'landmark';
+                  nextStay = 60;
                 }
 
                 // Never overwrite real opening hours (e.g. 星期一: 休息, 24 小時營業) with fallback '每日 10:00–21:00'
@@ -1318,7 +1332,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         }
 
         try {
-          localStorage.setItem('antigravity_places_audit_v4', new Date().toISOString());
+          localStorage.setItem('antigravity_places_audit_v5', new Date().toISOString());
         } catch {}
 
         setAuditProgress({
@@ -1347,7 +1361,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      const alreadyAudited = localStorage.getItem('antigravity_places_audit_v4');
+      const alreadyAudited = localStorage.getItem('antigravity_places_audit_v5');
       if (alreadyAudited) return;
     } catch {
       return;

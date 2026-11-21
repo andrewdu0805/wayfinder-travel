@@ -1838,9 +1838,9 @@ export function inferPlaceCategoryByName(text: string): {
     }
   }
 
-  // 4. Museums, Art Galleries, Cultural Parks & Exhibition Halls
+  // 4. Museums, Art Galleries, Cultural Halls, Tourist Factories & Exhibition Centers
   if (
-    /藝文中心|文化中心|藝術中心|藝術文化中心|音樂中心|演藝廳|音樂廳|歌劇院|劇院|文化園區|文創園區|文創園|文創特區|藝術特區|美術館|博物館|展覽館|展覽|藝術館|歷史館|鐵道館|糖廠|展演|故事館|紀念館|文物館|文學館|文化館|工藝館|故宮|天文館|科博館|科工館|科學館|海洋館|海生館|水族館|圖書館|駁二|衛武營|museum|gallery|art center/.test(
+    /文創館|觀光工廠|工場|體驗館|探索館|展示館|美學館|藝文館|生活館|藝文中心|文化中心|藝術中心|藝術文化中心|音樂中心|演藝廳|音樂廳|歌劇院|劇院|文化園區|文創園區|文創園|文創特區|藝術特區|美術館|博物館|展覽館|展覽|藝術館|歷史館|鐵道館|糖廠|展演|故事館|紀念館|文物館|文學館|文化館|工藝館|故宮|天文館|科博館|科工館|科學館|海洋館|海生館|水族館|圖書館|駁二|衛武營|museum|gallery|art center/.test(
       lower
     )
   ) {
@@ -1851,15 +1851,28 @@ export function inferPlaceCategoryByName(text: string): {
     };
   }
 
-  // 5. Historic Landmarks, Temples, Piers, Industrial Heritage (CRITICAL: Do NOT match bare '堡' or '宮' which matches 漢堡 or 宮保!)
+  // 5. Historic Landmarks, Temples, Piers, Fishing Harbors, Industrial Heritage (CRITICAL: Do NOT match bare '堡' or '宮' which matches 漢堡 or 宮保!)
   if (
-    /古蹟|歷史建築|磚窯|窯廠|酒廠|碼頭|漁港|港灣|書院|教堂|聖母|眷村|遺址|武德殿|出張所|領事館|洋行|別邸|逍遙園|忠烈祠|隧道|棧貳庫|大港橋|愛河灣|蓮池潭|龍虎塔|西子灣|紀念堂|宗祠|古厝|砲台|燈塔|城門|牌坊|神社|天后宮|城隍廟|關帝廟|文武廟|三清宮|佛寺|寺院|天主堂|大教堂|老街|古城|地標|安平古堡|億載金城|紅毛城|赤崁樓|孔廟/.test(
+    /蚵仔寮|漁港|碼頭|港灣|漁村|古蹟|歷史建築|磚窯|窯廠|酒廠|書院|教堂|聖母|眷村|遺址|武德殿|出張所|領事館|洋行|別邸|逍遙園|忠烈祠|隧道|棧貳庫|大港橋|愛河灣|蓮池潭|龍虎塔|西子灣|紀念堂|宗祠|古厝|砲台|燈塔|城門|牌坊|神社|天后宮|城隍廟|關帝廟|文武廟|三清宮|佛寺|寺院|天主堂|大教堂|老街|古城|地標|遊客中心|安平古堡|億載金城|紅毛城|赤崁樓|孔廟/.test(
       lower
     )
   ) {
     return {
       primary_category: 'museum_culture',
       sub_category: 'landmark',
+      estimated_stay_mins: 60,
+    };
+  }
+
+  // 5.5. Shopping, Night Markets, Fish Markets, Malls & Bookstores
+  if (
+    /夜市|魚市場|觀光魚市|市集|商圈|購物中心|百貨|商場|老市場|菜市場|黃昏市場|公有市場|選物|書店|書局|誠品|outlet|\bmall\b/.test(
+      lower
+    )
+  ) {
+    return {
+      primary_category: 'shopping',
+      sub_category: 'other',
       estimated_stay_mins: 60,
     };
   }
@@ -1873,9 +1886,9 @@ export function inferPlaceCategoryByName(text: string): {
     };
   }
 
-  // 7. Nature Outdoors, Hiking Trails, Scenic Areas (CRITICAL: Do NOT match bare '山' which matches 鼓山, 鳳山, 岡山, 中山路!)
+  // 7. Nature Outdoors, Hiking Trails, Scenic Areas, Farms & Ranches (CRITICAL: Do NOT match bare '山' which matches 鼓山, 鳳山, 岡山, 中山路!)
   if (
-    /登山步道|登山|步道|健行|步徑|林道|古道|森林公園|國家公園|都會公園|河濱公園|濱海公園|植物園|濕地|生態園區|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|沙灘|海水浴場|海岸風景|觀景台|瞭望台|神木|露營區/.test(
+    /登山步道|登山|步道|健行|步徑|林道|古道|森林公園|國家公園|都會公園|河濱公園|濱海公園|植物園|濕地|生態園區|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|沙灘|海水浴場|海岸風景|觀景台|瞭望台|神木|露營區|農場|牧場|休閒農業/.test(
       lower
     )
   ) {
