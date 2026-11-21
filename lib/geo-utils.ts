@@ -1539,10 +1539,11 @@ export function extractRegionFromAddress(
 
     // 1a. Japan bounds check
     if (lat >= 30.0 && lat <= 46.0 && lng >= 128.0 && lng <= 146.0) {
-      const cityMatch = clean.match(
-        /(東京都|大阪府|京都府|北海道|[^\s,]+?[都道府県])/
+      const jpClean = clean.replace(/^日本\s*/, '');
+      const cityMatch = jpClean.match(
+        /(東京都|大阪府|京都府|北海道|[^\s,日本]+?[都道府県])/
       );
-      const distMatch = clean.match(/([^\s,都道府県]+?[区區市町村])/);
+      const distMatch = jpClean.match(/([^\s,都道府県]+?[区區市町村])/);
       return {
         country: '日本',
         city: cityMatch ? cityMatch[1] : (lat > 35.5 && lng > 139.0 ? '東京都' : '大阪府'),

@@ -45,6 +45,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultRadiusMeters: 5000,
 };
 
+export interface PlaceAuditProgress {
+  current: number;
+  total: number;
+  fixedCount: number;
+  fixedDetails: string[];
+  done: boolean;
+}
+
 interface PlacesContextValue {
   places: SavedPlace[];
   categoryConfigs: CategoryConfig[];
@@ -53,6 +61,12 @@ interface PlacesContextValue {
   isHydrated: boolean;
   isSyncing: boolean;
   lastSyncMessage: string | null;
+  isAuditingPlaces: boolean;
+  auditProgress: PlaceAuditProgress | null;
+  clearAuditProgress: () => void;
+  auditAndFixAllPlaces: (
+    targetCity?: string
+  ) => Promise<{ totalChecked: number; fixedCount: number }>;
   smartUpsertPlaces: (incoming: SavedPlace[]) => UpsertActionRecord[];
   updatePlaceInline: (id: string, patch: Partial<SavedPlace>) => void;
   deletePlace: (id: string) => void;
@@ -370,8 +384,14 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncMessage, setLastSyncMessage] = useState<string | null>(null);
+  const [isAuditingPlaces, setIsAuditingPlaces] = useState(false);
+  const [auditProgress, setAuditProgress] = useState<PlaceAuditProgress | null>(
+    null
+  );
   const enrichedIdsRef = React.useRef<Set<string>>(new Set());
   const isEnrichingRef = React.useRef<boolean>(false);
+  const autoAuditTriggeredRef = React.useRef<boolean>(false);
+  const clearAuditProgress = useCallback(() => setAuditProgress(null), []);
 
   // Hydrate from localStorage on client mount
   useEffect(() => {
@@ -1029,6 +1049,233 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const auditAndFixAllPlaces = useCallback(
+    async (
+      targetCity?: string
+    ): Promise<{ totalChecked: number; fixedCount: number }> => {
+      const targets =
+        targetCity && targetCity !== 'ALL'
+          ? places.filter((p) => p.city === targetCity)
+          : places;
+
+      if (targets.length === 0) {
+        return { totalChecked: 0, fixedCount: 0 };
+      }
+
+      setIsAuditingPlaces(true);
+      let fixedCount = 0;
+      const fixedDetails: string[] = [];
+      setAuditProgress({
+        current: 0,
+        total: targets.length,
+        fixedCount: 0,
+        fixedDetails: [],
+        done: false,
+      });
+
+      const CHUNK_SIZE = 5;
+      try {
+        for (let i = 0; i < targets.length; i += CHUNK_SIZE) {
+          const chunk = targets.slice(i, i + CHUNK_SIZE);
+          try {
+            const res = await fetch('/api/smart-parse', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                batch: chunk.map((p) => ({
+                  url: p.google_maps_url || '',
+                  title: p.name,
+                  note: '',
+                  rowCoords:
+                    p.latitude && p.longitude
+                      ? { lat: p.latitude, lng: p.longitude }
+                      : null,
+                })),
+                defaultCity: chunk[0]?.city || '台南市',
+                categoryConfigs,
+                geminiApiKey: settings.geminiApiKey,
+                googleMapsApiKey: settings.googleMapsApiKey,
+              }),
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              const enrichedList: SavedPlace[] = Array.isArray(data.places)
+                ? data.places
+                : [];
+
+              const updatesById = new Map<string, SavedPlace>();
+
+              chunk.forEach((orig, idx) => {
+                const enriched = enrichedList[idx];
+                if (!enriched) return;
+
+                const nextName = cleanStoreName(enriched.name || orig.name) || orig.name;
+                const nextCity = enriched.city || orig.city;
+                const nextDist = enriched.district || orig.district;
+                const hasRealEnrichedAddr = /[路街段巷弄號大道]/.test(
+                  enriched.formatted_address || ''
+                );
+                const nextAddr = hasRealEnrichedAddr
+                  ? enriched.formatted_address
+                  : orig.formatted_address || enriched.formatted_address;
+
+                const nextPrimary = enriched.primary_category || orig.primary_category;
+                const nextSub = enriched.sub_category || orig.sub_category;
+                const nextStay = enriched.estimated_stay_mins || orig.estimated_stay_mins;
+                const nextHours = enriched.opening_hours_json || orig.opening_hours_json;
+
+                // Determine if original note should be replaced (English, empty, generic, mismatched category, or cross-district)
+                const origNote = (orig.user_notes || '').trim();
+                const isEnglishNote =
+                  origNote.length > 10 && !/[\u4e00-\u9fff]/.test(origNote);
+                const isGenericOrBadNote =
+                  !origNote ||
+                  isEnglishNote ||
+                  origNote.includes('Google Maps 在地高評價推薦熱點') ||
+                  origNote.includes('深獲旅人與老饕喜愛') ||
+                  origNote.includes('由 CSV 清單匯入') ||
+                  origNote.includes('由 Google Takeout 匯入') ||
+                  origNote.includes('透過智慧快速輸入新增') ||
+                  origNote.includes('以特色調酒與創意下酒料理聞名') ||
+                  origNote.includes('以特色原創調酒與精緻下酒料理聞名') ||
+                  origNote.includes('在地人氣餐酒酒吧') ||
+                  origNote.includes('人氣餐酒酒吧') ||
+                  origNote.includes('參觀者表示這座文化展館的展覽內容豐富且策展用心') ||
+                  origNote.includes('顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食') ||
+                  (nextPrimary !== 'restaurant' &&
+                    origNote.includes('這家餐廳的餐點美味')) ||
+                  (nextDist !== '中西區' && origNote.includes('國華街')) ||
+                  (nextDist !== '中西區' && origNote.includes('保安路'));
+
+                const nextNotes =
+                  isGenericOrBadNote && enriched.user_notes
+                    ? enriched.user_notes
+                    : origNote ||
+                      enriched.user_notes ||
+                      resolvePlaceDescription(
+                        nextName,
+                        nextCity,
+                        nextDist,
+                        nextSub,
+                        nextAddr
+                      );
+
+                const changes: string[] = [];
+                if (nextCity !== orig.city || nextDist !== orig.district) {
+                  changes.push(
+                    `地區 ${orig.city}・${orig.district} → ${nextCity}・${nextDist}`
+                  );
+                }
+                if (nextSub !== orig.sub_category) {
+                  const oldLabel =
+                    categoryConfigs.find((c) => c.sub_category === orig.sub_category)
+                      ?.sub_label || orig.sub_category;
+                  const newLabel =
+                    categoryConfigs.find((c) => c.sub_category === nextSub)
+                      ?.sub_label || nextSub;
+                  changes.push(`分類 ${oldLabel} → ${newLabel}`);
+                }
+                if (nextName !== orig.name) {
+                  changes.push(`店名修正`);
+                }
+                if (nextNotes !== origNote) {
+                  changes.push(`備註更新`);
+                }
+
+                if (changes.length > 0 || nextAddr !== orig.formatted_address) {
+                  if (changes.length > 0) {
+                    fixedCount += 1;
+                    fixedDetails.push(`${nextName}（${changes.join('、')}）`);
+                  }
+                  updatesById.set(orig.id, {
+                    ...orig,
+                    name: nextName,
+                    google_place_id:
+                      enriched.google_place_id || orig.google_place_id,
+                    formatted_address: nextAddr,
+                    country: enriched.country || orig.country,
+                    city: nextCity,
+                    district: nextDist,
+                    latitude: enriched.latitude || orig.latitude,
+                    longitude: enriched.longitude || orig.longitude,
+                    primary_category: nextPrimary,
+                    sub_category: nextSub,
+                    estimated_stay_mins: nextStay,
+                    rating: enriched.rating ?? orig.rating,
+                    business_status:
+                      enriched.business_status || orig.business_status,
+                    opening_hours_json: nextHours,
+                    user_notes: nextNotes,
+                    updated_at: new Date().toISOString(),
+                  });
+                }
+              });
+
+              if (updatesById.size > 0) {
+                setPlaces((prev) =>
+                  prev.map((p) => updatesById.get(p.id) || p)
+                );
+                setRecentUpserts((prev) =>
+                  prev.map((rec) => {
+                    const updated = updatesById.get(rec.place.id);
+                    return updated ? { ...rec, place: updated } : rec;
+                  })
+                );
+              }
+            }
+          } catch (chunkErr) {
+            console.warn('Audit chunk error:', chunkErr);
+          }
+
+          setAuditProgress({
+            current: Math.min(i + chunk.length, targets.length),
+            total: targets.length,
+            fixedCount,
+            fixedDetails: [...fixedDetails],
+            done: false,
+          });
+        }
+
+        try {
+          localStorage.setItem('antigravity_places_audit_v3', new Date().toISOString());
+        } catch {}
+
+        setAuditProgress({
+          current: targets.length,
+          total: targets.length,
+          fixedCount,
+          fixedDetails,
+          done: true,
+        });
+        return { totalChecked: targets.length, fixedCount };
+      } finally {
+        setIsAuditingPlaces(false);
+      }
+    },
+    [
+      places,
+      categoryConfigs,
+      settings.geminiApiKey,
+      settings.googleMapsApiKey,
+    ]
+  );
+
+  // One-time automatic full audit of all currently saved places after upgrading district/category/notes logic
+  useEffect(() => {
+    if (!isHydrated || autoAuditTriggeredRef.current || places.length === 0) {
+      return;
+    }
+    try {
+      const alreadyAudited = localStorage.getItem('antigravity_places_audit_v3');
+      if (alreadyAudited) return;
+    } catch {
+      return;
+    }
+    autoAuditTriggeredRef.current = true;
+    auditAndFixAllPlaces('ALL');
+  }, [isHydrated, places.length, auditAndFixAllPlaces]);
+
   const value = useMemo(
     () => ({
       places,
@@ -1038,6 +1285,10 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       isHydrated,
       isSyncing,
       lastSyncMessage,
+      isAuditingPlaces,
+      auditProgress,
+      clearAuditProgress,
+      auditAndFixAllPlaces,
       smartUpsertPlaces,
       updatePlaceInline,
       deletePlace,
@@ -1059,6 +1310,10 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       isHydrated,
       isSyncing,
       lastSyncMessage,
+      isAuditingPlaces,
+      auditProgress,
+      clearAuditProgress,
+      auditAndFixAllPlaces,
       smartUpsertPlaces,
       updatePlaceInline,
       deletePlace,

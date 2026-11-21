@@ -2,9 +2,12 @@
 
 import React, { useMemo, useState } from 'react';
 import {
+  CheckCircle2,
   FolderCog,
+  RefreshCw,
   RotateCcw,
   Search,
+  Sparkles,
   X,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
@@ -22,6 +25,10 @@ export function PlacesManagerView({
   const {
     places,
     categoryConfigs,
+    isAuditingPlaces,
+    auditProgress,
+    clearAuditProgress,
+    auditAndFixAllPlaces,
   } = usePlaces();
 
   const [selectedCity, setSelectedCity] = useState<string>('ALL');
@@ -345,9 +352,71 @@ export function PlacesManagerView({
                 重設
               </button>
             )}
+
+            <button
+              id="btn-audit-all-places"
+              type="button"
+              disabled={isAuditingPlaces || placesInSelectedCity.length === 0}
+              onClick={() => auditAndFixAllPlaces(selectedCity)}
+              title="依 Google Maps 網址重新檢查並修正地區、分類、營業時間與備註"
+              className="inline-flex items-center gap-1 rounded-xl border border-teal-300 bg-teal-50 px-2.5 py-1.5 text-xs font-extrabold text-teal-900 hover:bg-teal-100 disabled:opacity-50 cursor-pointer whitespace-nowrap shrink-0 transition-colors"
+            >
+              {isAuditingPlaces ? (
+                <RefreshCw className="h-3.5 w-3.5 animate-spin text-teal-700" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5 text-teal-700" />
+              )}
+              <span>{isAuditingPlaces ? '檢查中...' : '全面校驗'}</span>
+            </button>
           </div>
         </div>
       </section>
+
+      {/* 全面校驗進度與修正回報橫幅 */}
+      {auditProgress && (
+        <div
+          className={`rounded-2xl border px-4 py-3 text-sm shadow-xs transition-all ${
+            auditProgress.done
+              ? 'border-teal-200 bg-teal-50/90 text-teal-950'
+              : 'border-amber-200 bg-amber-50/90 text-amber-950'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              {auditProgress.done ? (
+                <CheckCircle2 className="h-5 w-5 text-teal-600 shrink-0 mt-0.5" />
+              ) : (
+                <RefreshCw className="h-5 w-5 text-amber-600 animate-spin shrink-0 mt-0.5" />
+              )}
+              <div className="space-y-1 min-w-0">
+                <p className="font-extrabold">
+                  {auditProgress.done
+                    ? `已完成全部 ${auditProgress.total} 筆地點校驗，共自動修正 ${auditProgress.fixedCount} 筆（地區、分類、備註或營業時間）`
+                    : `正在依 Google Maps 網址全面檢查地點（地區、分類、備註）：${auditProgress.current} / ${auditProgress.total}（已修正 ${auditProgress.fixedCount} 筆）...`}
+                </p>
+                {auditProgress.fixedDetails.length > 0 && (
+                  <p className="text-xs font-medium opacity-85 leading-relaxed">
+                    已修正項目：{auditProgress.fixedDetails.slice(0, 8).join('；')}
+                    {auditProgress.fixedDetails.length > 8
+                      ? ` 等共 ${auditProgress.fixedDetails.length} 筆`
+                      : ''}
+                  </p>
+                )}
+              </div>
+            </div>
+            {auditProgress.done && (
+              <button
+                type="button"
+                onClick={clearAuditProgress}
+                className="p-1 rounded-lg text-teal-700 hover:bg-teal-100 cursor-pointer shrink-0"
+                title="關閉通知"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 地點卡片清單（大字雙欄排版，手機單欄、平板電腦雙欄） */}
       {filteredPlaces.length === 0 ? (
