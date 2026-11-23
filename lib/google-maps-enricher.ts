@@ -623,14 +623,15 @@ export async function enrichPlaceFromGoogleMapsUrl(
         status: number,
         rawErrMsg?: string
       ): string => {
+        const detailSuffix = rawErrMsg ? `｜原因：${rawErrMsg.slice(0, 140)}` : '';
         if (status === 429) {
-          return '⚠️ Google Places API 配額已達上限（HTTP 429），已立即停止重試以節省額度，請稍後再試或檢查 Google Cloud 配額設定';
+          return `⚠️ Google Places API 配額已達上限（HTTP 429），已立即停止重試以節省額度${detailSuffix}`;
         }
         if (status === 403 || status === 401) {
-          return `⚠️ Google Places API 金鑰權限不足或受限（HTTP ${status}），已停止重試，請檢查 API Key 與 Places API (New) 設定`;
+          return `⚠️ Google Places API 金鑰權限不足或受限（HTTP ${status}），已停止重試${detailSuffix}`;
         }
         return `Google Places API 連線失敗（HTTP ${status}${
-          rawErrMsg ? `: ${rawErrMsg.slice(0, 80)}` : ''
+          rawErrMsg ? `: ${rawErrMsg.slice(0, 100)}` : ''
         }）`;
       };
 
@@ -640,17 +641,18 @@ export async function enrichPlaceFromGoogleMapsUrl(
         !existingPlaceId.startsWith('ChIJ_') &&
         existingPlaceId.length >= 20;
 
+      // Avoid AI summary / reviews fields (reviewSummary, generativeSummary, reviews) to prevent strict 429 limits & lower SKU tier
       const detailExtendedMask =
-        'id,displayName,formattedAddress,addressComponents,location,rating,regularOpeningHours,currentOpeningHours,googleMapsUri,businessStatus,primaryType,types,primaryTypeDisplayName,reviewSummary,generativeSummary,editorialSummary,reviews';
+        'id,displayName,formattedAddress,addressComponents,location,rating,regularOpeningHours,currentOpeningHours,googleMapsUri,businessStatus,primaryType,types,primaryTypeDisplayName,editorialSummary';
       const detailSafeCoreMask =
-        'id,displayName,formattedAddress,addressComponents,location,rating,regularOpeningHours,businessStatus,primaryType,types,editorialSummary';
+        'id,displayName,formattedAddress,addressComponents,location,rating,regularOpeningHours,businessStatus,primaryType,types';
       const detailMinimalMask =
         'id,displayName,formattedAddress,location,rating,regularOpeningHours,businessStatus,types';
 
       const searchExtendedMask =
-        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews';
+        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.editorialSummary';
       const searchSafeCoreMask =
-        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.primaryType,places.types,places.editorialSummary';
+        'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.primaryType,places.types';
       const searchMinimalMask =
         'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.types';
 
