@@ -1617,12 +1617,16 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       setLastSyncError(null);
 
       // Persist sync metadata
+      // Only mark HAS_SYNCED_ONCE when cloud actually has data or local pushed real places,
+      // so a fresh PWA syncing against an empty cloud won't push unmodified demo places later.
       const cloudSyncedKeys = new Set<string>([
         ...Array.from(remoteByKey.keys()),
         ...placesToPush.map(toCanonicalGooglePlaceId),
       ]);
       try {
-        localStorage.setItem(STORAGE_KEYS.HAS_SYNCED_ONCE, '1');
+        if (remotePlaces.length > 0 || placesToPush.length > 0) {
+          localStorage.setItem(STORAGE_KEYS.HAS_SYNCED_ONCE, '1');
+        }
         localStorage.setItem(STORAGE_KEYS.LAST_SYNCED_AT, syncedNowIso);
         localStorage.setItem(
           STORAGE_KEYS.LAST_SYNCED_PLACE_IDS,
