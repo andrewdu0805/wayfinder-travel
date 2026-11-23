@@ -7,6 +7,7 @@ import {
   estimateTravelMins,
 } from '@/lib/geo-utils';
 import { PRESET_DESTINATIONS } from '@/lib/default-data';
+import { isPlaceClosedAllDay, WEEKDAY_LABELS } from '@/lib/opening-hours';
 import {
   IntentStepBlock,
   ItineraryPlan,
@@ -294,6 +295,7 @@ function buildPlanFromSelectedStops(params: {
   refreshedCount: number;
   excludedClosedPlaces: Array<{ name: string; reason: string }>;
   endBufferMins?: number;
+  dayOfWeek?: number;
 }): ItineraryPlan {
   const {
     planId,
@@ -308,6 +310,7 @@ function buildPlanFromSelectedStops(params: {
     allNearbyCandidates,
     refreshedCount,
     excludedClosedPlaces,
+    dayOfWeek,
   } = params;
 
   const isStationEnd =
@@ -429,7 +432,8 @@ function buildPlanFromSelectedStops(params: {
     const openCheck = checkPlaceOpenAtTime(
       place.opening_hours_json,
       place.business_status,
-      arrivalTime
+      arrivalTime,
+      dayOfWeek
     );
 
     const nextStopPlace =
@@ -464,12 +468,13 @@ function buildPlanFromSelectedStops(params: {
         const altOpen = checkPlaceOpenAtTime(
           cand.opening_hours_json,
           cand.business_status,
-          altArr
+          altArr,
+          dayOfWeek
         );
         return {
           place: cand,
           distance_from_prev_meters: dPrev,
-          chain_score: dPrev + dNext * 0.75,
+          chain_score: dPrev + dNext * 0.75 + (altOpen.isOpen ? 0 : 15000),
           travel_mins_from_prev: t,
           open_status_note: altOpen.note,
         };
@@ -749,6 +754,28 @@ export async function POST(req: NextRequest) {
         });
         continue;
       }
+      if (p.business_status === 'CLOSED_TEMPORARILY') {
+        excludedClosedPlaces.push({
+          name: p.name,
+          reason: 'Google 營業狀態為「暫停營業」，自動排除',
+        });
+        continue;
+      }
+
+      const targetDayOfWeek: number =
+        typeof body.dayOfWeek === 'number' && Number.isFinite(body.dayOfWeek)
+          ? ((body.dayOfWeek % 7) + 7) % 7
+          : new Date().getDay();
+      const isPinnedPlace = Array.from(pinnedBySubCat.values()).some(
+        (pin) => pin.id === p.id
+      );
+      if (!isPinnedPlace && isPlaceClosedAllDay(p.opening_hours_json, targetDayOfWeek)) {
+        excludedClosedPlaces.push({
+          name: p.name,
+          reason: `${WEEKDAY_LABELS[targetDayOfWeek]}公休，自動排除以免撲空`,
+        });
+        continue;
+      }
 
       spatialCandidates.push({
         ...p,
@@ -756,7 +783,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Global Beam-Search Route Optimizer: adapts scoring by travelMode AND endAnchor (return to hotel/station!)
+    const dayOfWeek: number =
+      typeof body.dayOfWeek === 'number' && Number.isFinite(body.dayOfWeek)
+        ? ((body.dayOfWeek % 7) + 7) % 7
+        : new Date().getDay();
+
+    // Global Beam-Search Route Optimizer: adapts scoring by travelMode, opening hours on dayOfWeek, AND endAnchor!
     type PathNode = {
       picks: Array<{
         place: SavedPlace;
@@ -766,6 +798,7 @@ export async function POST(req: NextRequest) {
       usedIds: Set<string>;
       lastLat: number;
       lastLng: number;
+      currentClock: string;
       totalScore: number;
     };
 
@@ -775,6 +808,7 @@ export async function POST(req: NextRequest) {
         usedIds: new Set<string>(),
         lastLat: origin.latitude,
         lastLng: origin.longitude,
+        currentClock: startTime,
         totalScore: 0,
       },
     ];
@@ -832,6 +866,20 @@ export async function POST(req: NextRequest) {
             cand.latitude,
             cand.longitude
           );
+          const legTravelMins = estimateTravelMins(legDist, travelMode);
+          const estArrival = addMinutesToTime(branch.currentClock, legTravelMins);
+          const estDeparture = addMinutesToTime(
+            estArrival,
+            cand.estimated_stay_mins || 60
+          );
+          const estOpenCheck = checkPlaceOpenAtTime(
+            cand.opening_hours_json,
+            cand.business_status,
+            estArrival,
+            dayOfWeek
+          );
+          const closedAtArrivalPenalty = estOpenCheck.isOpen ? 0 : 25000;
+
           const lookaheadDist = nextPinned
             ? calculateDistanceMeters(
                 cand.latitude,
@@ -884,12 +932,14 @@ export async function POST(req: NextRequest) {
             usedIds: nextUsed,
             lastLat: cand.latitude,
             lastLng: cand.longitude,
+            currentClock: estDeparture,
             totalScore:
               branch.totalScore +
               modeScore +
               lookaheadDist +
               hotelReturnPenalty +
-              unvisitedBonus,
+              unvisitedBonus +
+              closedAtArrivalPenalty,
           });
         }
       }
@@ -934,6 +984,7 @@ export async function POST(req: NextRequest) {
           refreshedCount: spatialCandidates.length,
           excludedClosedPlaces,
           endBufferMins,
+          dayOfWeek,
         })
       );
     }
@@ -954,6 +1005,7 @@ export async function POST(req: NextRequest) {
           refreshedCount: spatialCandidates.length,
           excludedClosedPlaces,
           endBufferMins,
+          dayOfWeek,
         })
       );
     }

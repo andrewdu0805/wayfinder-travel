@@ -1,4 +1,9 @@
 import { OpeningHoursJson, SavedPlace, TravelMode } from '@/types/place';
+import {
+  formatRangesText,
+  parseWeekdaySchedule,
+  WEEKDAY_LABELS,
+} from '@/lib/opening-hours';
 
 /**
  * Calculate Haversine distance in meters between two coordinates
@@ -59,36 +64,69 @@ export function addMinutesToTime(timeStr: string, minutesToAdd: number): string 
 }
 
 /**
- * Check if a place is open at a given "HH:MM" time
+ * Check if a place is open at a given "HH:MM" time on a specific dayOfWeek (0=Sun .. 6=Sat).
+ * Supports per-weekday closed days (公休), split shifts (e.g. lunch + dinner), and overnight hours.
  */
 export function checkPlaceOpenAtTime(
   openingHours: OpeningHoursJson | null,
   businessStatus: string,
-  arrivalTimeStr: string
+  arrivalTimeStr: string,
+  dayOfWeek?: number
 ): { isOpen: boolean; note: string } {
   if (businessStatus === 'CLOSED_PERMANENTLY') {
     return { isOpen: false, note: '已永久歇業' };
   }
   if (businessStatus === 'CLOSED_TEMPORARILY') {
-    return { isOpen: false, note: '今日臨時公休' };
-  }
-  if (!openingHours?.daily_hours) {
-    return { isOpen: true, note: '營業中（全天或依現場公告）' };
+    return { isOpen: false, note: '暫停營業' };
   }
 
-  const { open, close } = openingHours.daily_hours;
   const toMins = (t: string) => {
     const [h, m] = t.split(':').map((v) => parseInt(v, 10) || 0);
     return h * 60 + m;
   };
   const arr = toMins(arrivalTimeStr);
-  const op = toMins(open);
-  let cl = toMins(close);
-  if (cl <= op) cl += 24 * 60; // overnight hours
 
-  const normalizedArr = arr < op && cl > 24 * 60 ? arr + 24 * 60 : arr;
-  const isOpen = normalizedArr >= op && normalizedArr <= cl - 15;
-  if (isOpen) {
+  const isOpenInRange = (open: string, close: string): boolean => {
+    if (open === '00:00' && close === '23:59') return true;
+    const op = toMins(open);
+    let cl = toMins(close);
+    if (cl <= op) cl += 24 * 60; // overnight hours
+    const normalizedArr = arr < op && cl > 24 * 60 ? arr + 24 * 60 : arr;
+    return normalizedArr >= op && normalizedArr <= cl - 15;
+  };
+
+  // 1. Per-weekday schedule check when dayOfWeek is provided
+  if (dayOfWeek !== undefined && Number.isFinite(dayOfWeek)) {
+    const safeDay = ((dayOfWeek % 7) + 7) % 7;
+    const dayLabel = WEEKDAY_LABELS[safeDay];
+    const schedule = parseWeekdaySchedule(openingHours);
+    if (schedule && Array.isArray(schedule[safeDay])) {
+      const ranges = schedule[safeDay];
+      if (ranges.length === 0) {
+        return { isOpen: false, note: `${dayLabel}公休` };
+      }
+      const matched = ranges.find((r) => isOpenInRange(r.open, r.close));
+      const allText = formatRangesText(ranges);
+      if (matched) {
+        return {
+          isOpen: true,
+          note: `${dayLabel}營業中 (${allText})`,
+        };
+      }
+      return {
+        isOpen: false,
+        note: `${dayLabel} ${arrivalTimeStr} 未營業 (${dayLabel}營業時間 ${allText})`,
+      };
+    }
+  }
+
+  // 2. Fallback to daily_hours
+  if (!openingHours?.daily_hours) {
+    return { isOpen: true, note: '營業中（全天或依現場公告）' };
+  }
+
+  const { open, close } = openingHours.daily_hours;
+  if (isOpenInRange(open, close)) {
     return { isOpen: true, note: `營業中 (${open}–${close})` };
   }
   return {

@@ -24,9 +24,13 @@ export interface TripAnchor {
 export type DayKind = 'single' | 'arrival' | 'middle' | 'departure';
 export type SingleDayEnd = 'none' | 'hotel' | 'station';
 
+import { WEEKDAY_LABELS } from '@/lib/opening-hours';
+
 export interface TripDay {
   id: string;
   dayIndex: number;
+  dateStr: string;   // "YYYY-MM-DD"
+  dayOfWeek: number; // 0 = Sun, 1 = Mon, ..., 6 = Sat
   kind: DayKind;
   startAnchor: TripAnchor;
   endAnchor: TripAnchor | null;
@@ -41,6 +45,7 @@ export interface TripDay {
 export interface TripState {
   destId: string;
   numDays: number;
+  startDate: string; // "YYYY-MM-DD"
   hotel: TripAnchor;
   customHotels: TripAnchor[];
   arrivalStationId: string; // '' = 不指定（從市區出發）
@@ -56,6 +61,46 @@ export interface TripState {
 }
 
 export const TRIP_STORAGE_KEY = 'wayfinder_trip_v1';
+
+export function getLocalDateStr(offsetDays = 0): string {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function addDaysToDateStr(baseDateStr: string, offsetDays: number): string {
+  const m = (baseDateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
+export function getDayOfWeekFromDateStr(dateStr?: string): number {
+  const m = (dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return 1;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0).getDay();
+}
+
+export function formatShortDateWithWeekday(dateStr?: string, dayOfWeek?: number): string {
+  const m = (dateStr || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+  if (!m && (dayOfWeek === undefined || !Number.isFinite(dayOfWeek))) {
+    return '選擇日期';
+  }
+  const dow =
+    typeof dayOfWeek === 'number' && Number.isFinite(dayOfWeek)
+      ? ((dayOfWeek % 7) + 7) % 7
+      : getDayOfWeekFromDateStr(dateStr);
+  const md = m ? `${Number(m[1])}/${Number(m[2])} ` : '';
+  return `${md}${WEEKDAY_LABELS[dow]}`;
+}
 
 // ---------------------------------------------------------------------------
 // Stations & hotels per city
@@ -302,6 +347,8 @@ export function buildTripDays(trip: TripState): TripDay[] {
   const arrSt = stations.find((s) => s.id === trip.arrivalStationId) || null;
   const depSt = stations.find((s) => s.id === trip.departureStationId) || null;
   const n = Math.max(1, Math.min(7, trip.numDays));
+  const baseDate =
+    trip.startDate || (typeof window !== 'undefined' ? getLocalDateStr(1) : '');
   const days: TripDay[] = [];
 
   const mk = (
@@ -311,18 +358,23 @@ export function buildTripDays(trip: TripState): TripDay[] {
     endAnchor: TripAnchor | null,
     startTime: string,
     endTime: string
-  ): TripDay => ({
-    id: `day-${dayIndex + 1}`,
-    dayIndex,
-    kind,
-    startAnchor,
-    endAnchor,
-    startTime,
-    endTime,
-    plans: [],
-    activePlanIndex: 0,
-    error: null,
-  });
+  ): TripDay => {
+    const dateStr = addDaysToDateStr(baseDate, dayIndex);
+    return {
+      id: `day-${dayIndex + 1}`,
+      dayIndex,
+      dateStr,
+      dayOfWeek: getDayOfWeekFromDateStr(dateStr),
+      kind,
+      startAnchor,
+      endAnchor,
+      startTime,
+      endTime,
+      plans: [],
+      activePlanIndex: 0,
+      error: null,
+    };
+  };
 
   if (n === 1) {
     let end: TripAnchor | null = null;
@@ -487,6 +539,7 @@ const RELATIVE_DAY: Array<[RegExp, number]> = [
 export interface ParsedTripText {
   destId?: string;
   numDays?: number;
+  startDate?: string;
   hotelName?: string;
   arrivalStationType?: 'hsr' | 'train';
   departureStationType?: 'hsr' | 'train';
@@ -496,10 +549,45 @@ export interface ParsedTripText {
   singleDayEnd?: SingleDayEnd;
 }
 
+const CN_WEEKDAY_MAP: Record<string, number> = {
+  日: 0,
+  天: 0,
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+};
+
 export function parseTripFromText(text: string): ParsedTripText {
   const clean = (text || '').trim();
   const out: ParsedTripText = {};
   if (!clean) return out;
+
+  // Start date: explicit weekday ("下週三" / "週一" / "星期六") or relative day ("今天"/"明天"/"後天"/"大後天")
+  if (typeof window !== 'undefined') {
+    const wdMatch = clean.match(/(下個?|這個?|本)?(?:星期|週|周|禮拜)([日天一二三四五六])/);
+    if (wdMatch) {
+      const prefix = wdMatch[1] || '';
+      const targetDow = CN_WEEKDAY_MAP[wdMatch[2]];
+      if (targetDow !== undefined) {
+        const todayDow = new Date().getDay();
+        let diff = (targetDow - todayDow + 7) % 7;
+        if (prefix.startsWith('下')) {
+          diff = diff === 0 ? 7 : diff + (targetDow <= todayDow ? 0 : 7);
+        }
+        out.startDate = getLocalDateStr(diff);
+      }
+    } else {
+      for (const [re, offset] of RELATIVE_DAY) {
+        if (re.test(clean)) {
+          out.startDate = getLocalDateStr(offset);
+          break;
+        }
+      }
+    }
+  }
 
   // Destination: earliest-mentioned preset city/district
   let bestIdx = Infinity;
@@ -600,6 +688,7 @@ export function applyParsedToTrip(trip: TripState, parsed: ParsedTripText): Trip
     };
   }
   if (parsed.numDays) next.numDays = parsed.numDays;
+  if (parsed.startDate) next.startDate = parsed.startDate;
   if (parsed.travelMode) next.travelMode = parsed.travelMode;
   if (parsed.arrivalTime) next.arrivalTime = parsed.arrivalTime;
   if (parsed.departureTime) next.departureTime = parsed.departureTime;
@@ -649,6 +738,7 @@ export function createBaseTrip(destId?: string, travelMode?: TravelMode): TripSt
   return {
     destId: id,
     numDays: 1,
+    startDate: typeof window !== 'undefined' ? getLocalDateStr(1) : '',
     hotel: defaultHotelForDest(id),
     customHotels: [],
     arrivalStationId: '',

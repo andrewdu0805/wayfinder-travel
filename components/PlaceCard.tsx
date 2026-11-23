@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Clock,
   ExternalLink,
@@ -16,6 +16,7 @@ import {
   ALL_TAIWAN_CITY_DISTRICTS,
 } from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
+import { getWeekdayHoursSummary } from '@/lib/opening-hours';
 import { BusinessStatus, SavedPlace, VisitStatus } from '@/types/place';
 
 const CITY_DISTRICTS_MAP = ALL_TAIWAN_CITY_DISTRICTS;
@@ -34,6 +35,12 @@ export function PlaceCard({ place }: PlaceCardProps) {
 
   const [isSyncingCard, setIsSyncingCard] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [showWeeklyHours, setShowWeeklyHours] = useState(false);
+  const [todayDow, setTodayDow] = useState<number | null>(null);
+
+  useEffect(() => {
+    setTodayDow(new Date().getDay());
+  }, []);
 
   const handleSyncFromGoogleMaps = async () => {
     setIsSyncingCard(true);
@@ -142,15 +149,7 @@ export function PlaceCard({ place }: PlaceCardProps) {
     (c) => c.sub_category === place.sub_category
   );
 
-  const weekdayList = place.opening_hours_json?.weekday_descriptions || [];
-  const primaryWeekdayDesc =
-    weekdayList.find((d) => d && !/休息|公休|Closed/i.test(d)) ||
-    weekdayList[0];
-  const hoursText =
-    primaryWeekdayDesc ||
-    (place.opening_hours_json?.daily_hours
-      ? `每日 ${place.opening_hours_json.daily_hours.open}–${place.opening_hours_json.daily_hours.close}`
-      : '營業時間依現場公告');
+  const todayHours = getWeekdayHoursSummary(place.opening_hours_json, todayDow);
 
   const cityDistricts = CITY_DISTRICTS_MAP[place.city] || [];
   const availableDistricts =
@@ -282,17 +281,45 @@ export function PlaceCard({ place }: PlaceCardProps) {
             </h3>
           </div>
 
-          {/* 第 4 排：停留時間與營業時間 ＋ 一鍵同步 Google Maps */}
+          {/* 第 4 排：停留時間與今日（週幾）營業時間 ＋ 一鍵同步 Google Maps */}
           <div className="flex items-center justify-between gap-2 pt-2 border-t border-stone-100">
-            <span className="min-w-0 truncate text-xs sm:text-sm font-bold text-stone-500">
-              ⏱️ {place.estimated_stay_mins}分 ｜ {hoursText}
-            </span>
+            <button
+              type="button"
+              onClick={() =>
+                todayHours.hasStructuredSchedule &&
+                setShowWeeklyHours((prev) => !prev)
+              }
+              title={
+                todayHours.hasStructuredSchedule
+                  ? '點擊展開／收合每週七天營業時間'
+                  : undefined
+              }
+              className={`min-w-0 text-left truncate text-xs sm:text-sm font-bold flex items-center gap-1 ${
+                todayHours.isClosed
+                  ? 'text-rose-600'
+                  : 'text-stone-600'
+              } ${
+                todayHours.hasStructuredSchedule
+                  ? 'hover:text-stone-900 cursor-pointer'
+                  : 'cursor-default'
+              }`}
+            >
+              <span className="truncate">
+                ⏱️ {place.estimated_stay_mins}分 ｜{' '}
+                {todayHours.isClosed ? `🚫 ${todayHours.text}` : todayHours.text}
+              </span>
+              {todayHours.hasStructuredSchedule && (
+                <span className="text-[10px] text-stone-400 shrink-0">
+                  {showWeeklyHours ? '▲' : '▼'}
+                </span>
+              )}
+            </button>
 
             <button
               type="button"
               disabled={isSyncingCard}
               onClick={handleSyncFromGoogleMaps}
-              title="依 Google Maps 網址同步行政區、分類與營業時間"
+              title="依 Google Maps 網址同步行政區、分類與每週營業時間"
               className="shrink-0 inline-flex items-center gap-1 rounded-xl border border-stone-200 bg-stone-50 hover:bg-amber-50 hover:border-amber-300 px-2.5 py-1 text-xs font-extrabold text-stone-700 hover:text-amber-900 disabled:opacity-50 transition-colors cursor-pointer whitespace-nowrap"
             >
               <Sparkles
@@ -303,6 +330,35 @@ export function PlaceCard({ place }: PlaceCardProps) {
               <span>{isSyncingCard ? '同步中...' : '同步地圖資訊'}</span>
             </button>
           </div>
+
+          {/* 展開式：每週七天完整營業時間 */}
+          {showWeeklyHours && todayHours.fullWeek.length > 0 && (
+            <div className="rounded-xl border border-stone-200 bg-stone-50/90 px-3 py-2 text-xs space-y-1">
+              {todayHours.fullWeek.map((row) => {
+                const isToday = row.day === todayHours.dayOfWeek;
+                return (
+                  <div
+                    key={row.day}
+                    className={`flex items-center justify-between gap-2 rounded-md px-1.5 py-0.5 ${
+                      isToday
+                        ? row.isClosed
+                          ? 'bg-rose-100/80 text-rose-800 font-black'
+                          : 'bg-amber-100/80 text-amber-950 font-black'
+                        : row.isClosed
+                        ? 'text-rose-500 font-bold'
+                        : 'text-stone-600 font-medium'
+                    }`}
+                  >
+                    <span>
+                      {row.label}
+                      {isToday ? '（今天）' : ''}
+                    </span>
+                    <span className="text-right">{row.text}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {syncFeedback && (
             <p

@@ -671,11 +671,11 @@ export async function POST(req: NextRequest) {
               );
               if (distKm <= 2.5) {
                 if (top.rating) resolved.rating = top.rating;
-                if (top.regularOpeningHours?.weekdayDescriptions) {
-                  resolved.opening_hours_json = {
-                    open_now: true,
-                    weekday_descriptions: top.regularOpeningHours.weekdayDescriptions,
-                  };
+                const parsedSingleHours = parseGoogleOpeningHours(
+                  top.regularOpeningHours
+                );
+                if (parsedSingleHours) {
+                  resolved.opening_hours_json = parsedSingleHours;
                 }
                 if (top.formattedAddress && !resolved.formatted_address.includes('號')) {
                   resolved.formatted_address = top.formattedAddress;

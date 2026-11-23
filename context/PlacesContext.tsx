@@ -29,6 +29,7 @@ import {
   separateNameAndAddress,
 } from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
+import { normalizeOpeningHoursForStorage } from '@/lib/opening-hours';
 
 const STORAGE_KEYS = {
   PLACES: 'antigravity_travel_places_v1',
@@ -139,7 +140,7 @@ function placeToSupabaseRow(p: SavedPlace) {
       typeof p.rating === 'number' && Number.isFinite(p.rating)
         ? Number(p.rating.toFixed(1))
         : null,
-    opening_hours_json: p.opening_hours_json ?? null,
+    opening_hours_json: normalizeOpeningHoursForStorage(p.opening_hours_json),
     google_maps_url: p.google_maps_url || '',
     user_notes: p.user_notes || '',
     custom_tags: Array.isArray(p.custom_tags) ? p.custom_tags : [],

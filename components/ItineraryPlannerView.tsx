@@ -34,11 +34,15 @@ import {
   TripAnchor,
   TripDay,
   TripState,
+  addDaysToDateStr,
   applyParsedToTrip,
   buildDayBlocks,
   createDefaultTrip,
   defaultHotelForDest,
+  formatShortDateWithWeekday,
+  getDayOfWeekFromDateStr,
   getDest,
+  getLocalDateStr,
   hotelsForTrip,
   nightsLabel,
   parseTripFromText,
@@ -277,6 +281,10 @@ export function ItineraryPlannerView() {
             endAnchor,
             endBufferMins: isStationEnd ? 25 : 0,
             travelMode: tripSnap.travelMode,
+            dayOfWeek:
+              typeof day.dayOfWeek === 'number'
+                ? day.dayOfWeek
+                : getDayOfWeekFromDateStr(day.dateStr || tripSnap.startDate),
             intentText: text,
             intentBlocks: buildDayBlocks(day.kind, startTime, endTime),
           }),
@@ -371,12 +379,25 @@ export function ItineraryPlannerView() {
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved?.trip?.days?.length > 0 && saved.trip.hotel) {
-          setTrip(saved.trip);
+          const baseStartDate = saved.trip.startDate || getLocalDateStr(1);
+          const normalizedDays = saved.trip.days.map((d: TripDay, idx: number) => {
+            const dateStr = d.dateStr || addDaysToDateStr(baseStartDate, idx);
+            const dayOfWeek =
+              typeof d.dayOfWeek === 'number'
+                ? d.dayOfWeek
+                : getDayOfWeekFromDateStr(dateStr);
+            return { ...d, dateStr, dayOfWeek };
+          });
+          setTrip({
+            ...saved.trip,
+            startDate: baseStartDate,
+            days: normalizedDays,
+          });
           if (typeof saved.intentText === 'string') setIntentText(saved.intentText);
           if (Array.isArray(saved.sessionSkippedIds)) {
             setSessionSkippedIds(saved.sessionSkippedIds);
           }
-          loaded = saved.trip.days.some(
+          loaded = normalizedDays.some(
             (d: TripDay) => (d.plans || []).length > 0
           );
         }
@@ -429,7 +450,8 @@ export function ItineraryPlannerView() {
       const openInfo = checkPlaceOpenAtTime(
         stop.place.opening_hours_json,
         stop.place.business_status,
-        arr
+        arr,
+        activeDay?.dayOfWeek
       );
 
       clock = dep;
@@ -757,8 +779,9 @@ export function ItineraryPlannerView() {
     const departure = addMinutesToTime(arrival, stayMins);
     const openCheck = checkPlaceOpenAtTime(
       placeToAdd.opening_hours_json,
+      placeToAdd.business_status,
       arrival,
-      departure
+      activeDay?.dayOfWeek
     );
 
     const newStop: ItineraryStop = {
@@ -927,7 +950,8 @@ export function ItineraryPlannerView() {
             <span className="inline-flex items-center gap-1.5 text-sm sm:text-base font-extrabold text-stone-900 min-w-0">
               <CalendarDays className="h-4 w-4 text-amber-700 shrink-0" />
               <span className="whitespace-nowrap">
-                {dest.city.replace(/[市縣府]$/, '')}・{nightsLabel(trip.numDays)}
+                {dest.city.replace(/[市縣府]$/, '')}・{nightsLabel(trip.numDays)}・
+                {formatShortDateWithWeekday(trip.startDate)}出發
               </span>
               {isMultiDay && (
                 <span className="text-xs sm:text-sm font-bold text-stone-500 truncate">
@@ -942,8 +966,8 @@ export function ItineraryPlannerView() {
 
           {showTripSettings && (
             <div className="space-y-3">
-              {/* 城市 ＋ 天數 */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* 城市 ＋ 天數 ＋ 出發日期（自動判斷週幾與公休日） */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <label className="space-y-1">
                   <span className="text-xs sm:text-sm font-extrabold text-stone-600">📍 目的地</span>
                   <select
@@ -957,6 +981,31 @@ export function ItineraryPlannerView() {
                       </option>
                     ))}
                   </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs sm:text-sm font-extrabold text-stone-600">
+                    🗓️ 出發日期（{formatShortDateWithWeekday(trip.startDate)}）
+                  </span>
+                  <input
+                    type="date"
+                    value={trip.startDate || ''}
+                    onChange={(e) => {
+                      const nextDate = e.target.value || getLocalDateStr(1);
+                      setTrip((prev) => ({
+                        ...prev,
+                        startDate: nextDate,
+                        days: prev.days.map((d, idx) => {
+                          const dateStr = addDaysToDateStr(nextDate, idx);
+                          return {
+                            ...d,
+                            dateStr,
+                            dayOfWeek: getDayOfWeekFromDateStr(dateStr),
+                          };
+                        }),
+                      }));
+                    }}
+                    className="w-full rounded-xl border-2 border-stone-300 bg-white px-2.5 py-1.5 text-sm sm:text-base font-extrabold text-stone-900"
+                  />
                 </label>
                 <div className="space-y-1">
                   <span className="text-xs sm:text-sm font-extrabold text-stone-600">📅 天數</span>
@@ -1219,7 +1268,7 @@ export function ItineraryPlannerView() {
                   }`}
                 >
                   <div className="text-base font-extrabold whitespace-nowrap">
-                    第 {d.dayIndex + 1} 天・{DAY_KIND_LABEL[d.kind]}
+                    第 {d.dayIndex + 1} 天・{formatShortDateWithWeekday(d.dateStr, d.dayOfWeek)}
                   </div>
                   <div
                     className={`text-xs font-bold whitespace-nowrap ${
@@ -1233,7 +1282,7 @@ export function ItineraryPlannerView() {
                     ) : d.error ? (
                       '⚠️ 未排出'
                     ) : (
-                      `${d.startTime} 起・${stopsCount} 站`
+                      `${DAY_KIND_LABEL[d.kind]}・${d.startTime} 起・${stopsCount} 站`
                     )}
                   </div>
                 </button>
@@ -1249,8 +1298,8 @@ export function ItineraryPlannerView() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-base sm:text-lg font-extrabold text-stone-900">
               {trip.days.length > 1
-                ? `第 ${activeDay.dayIndex + 1} 天・${DAY_KIND_LABEL[activeDay.kind]}`
-                : '今日行程'}
+                ? `第 ${activeDay.dayIndex + 1} 天（${formatShortDateWithWeekday(activeDay.dateStr, activeDay.dayOfWeek)}）・${DAY_KIND_LABEL[activeDay.kind]}`
+                : `今日行程（${formatShortDateWithWeekday(activeDay.dateStr, activeDay.dayOfWeek)}）`}
             </div>
             <button
               type="button"
@@ -1266,6 +1315,25 @@ export function ItineraryPlannerView() {
               重排這天
             </button>
           </div>
+
+          {activePlan &&
+            activePlan.excluded_closed_places?.some((ex) =>
+              /公休|歇業|暫停營業/.test(ex.reason)
+            ) && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs font-bold text-rose-800">
+                🚫 已自動避開當天公休／未營業店家以免撲空：
+                {activePlan.excluded_closed_places
+                  .filter((ex) => /公休|歇業|暫停營業/.test(ex.reason))
+                  .slice(0, 6)
+                  .map((ex) => `${ex.name}（${ex.reason.replace(/，自動排除以免撲空|，自動排除/, '')}）`)
+                  .join('、')}
+                {activePlan.excluded_closed_places.filter((ex) =>
+                  /公休|歇業|暫停營業/.test(ex.reason)
+                ).length > 6
+                  ? ' 等'
+                  : ''}
+              </div>
+            )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 space-y-1.5">

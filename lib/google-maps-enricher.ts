@@ -40,8 +40,17 @@ function padMin(n: number): string {
   return String(Math.max(0, Math.min(59, n))).padStart(2, '0');
 }
 
+import {
+  formatRangesText,
+  normalizeOpeningHoursForStorage,
+  WEEKDAY_DISPLAY_ORDER,
+  WEEKDAY_LABELS,
+} from '@/lib/opening-hours';
+import { OpeningPeriodRange } from '@/types/place';
+
 /**
  * Parse Google Places API (New) regularOpeningHours into app opening_hours_json
+ * preserving all 7 days in `by_weekday`, `daily_hours.closed_days`, and `weekday_descriptions`.
  */
 export function parseGoogleOpeningHours(
   hours?: GoogleOpeningHours
@@ -53,8 +62,10 @@ export function parseGoogleOpeningHours(
 
   let openStr = '';
   let closeStr = '';
+  const byWeekday: Record<string, OpeningPeriodRange[]> = {};
+  let builtByWeekdayFromPeriods = false;
 
-  // 1. Parse from structured periods
+  // 1. Parse structured periods into per-weekday ranges ("0"=Sun .. "6"=Sat)
   if (Array.isArray(hours.periods) && hours.periods.length > 0) {
     // Check 24h place (single period with day 0, hour 0, min 0 and no close)
     if (
@@ -64,18 +75,30 @@ export function parseGoogleOpeningHours(
     ) {
       openStr = '00:00';
       closeStr = '23:59';
+      for (let d = 0; d < 7; d++) {
+        byWeekday[String(d)] = [{ open: '00:00', close: '23:59' }];
+      }
+      builtByWeekdayFromPeriods = true;
     } else {
-      const firstValid = hours.periods.find(
-        (p) =>
-          typeof p.open?.hour === 'number' && typeof p.close?.hour === 'number'
-      );
-      if (firstValid && firstValid.open && firstValid.close) {
-        openStr = `${pad2(firstValid.open.hour ?? 10)}:${padMin(
-          firstValid.open.minute ?? 0
-        )}`;
-        closeStr = `${pad2(firstValid.close.hour ?? 21)}:${padMin(
-          firstValid.close.minute ?? 0
-        )}`;
+      for (let d = 0; d < 7; d++) {
+        byWeekday[String(d)] = [];
+      }
+      for (const p of hours.periods) {
+        if (
+          typeof p.open?.day === 'number' &&
+          typeof p.open?.hour === 'number' &&
+          typeof p.close?.hour === 'number'
+        ) {
+          const dayKey = String(((p.open.day % 7) + 7) % 7);
+          const open = `${pad2(p.open.hour)}:${padMin(p.open.minute ?? 0)}`;
+          const close = `${pad2(p.close.hour)}:${padMin(p.close.minute ?? 0)}`;
+          byWeekday[dayKey].push({ open, close });
+          if (!openStr) {
+            openStr = open;
+            closeStr = close;
+          }
+          builtByWeekdayFromPeriods = true;
+        }
       }
     }
   }
@@ -99,19 +122,33 @@ export function parseGoogleOpeningHours(
     }
   }
 
-  if (weekdayDescriptions.length === 0 && !openStr) return null;
+  if (weekdayDescriptions.length === 0 && !openStr && !builtByWeekdayFromPeriods) {
+    return null;
+  }
 
-  return {
+  const closedDays = builtByWeekdayFromPeriods
+    ? [0, 1, 2, 3, 4, 5, 6].filter((d) => byWeekday[String(d)].length === 0)
+    : undefined;
+
+  const base: SavedPlace['opening_hours_json'] = {
     open_now: hours.openNow ?? true,
     weekday_descriptions:
       weekdayDescriptions.length > 0
         ? weekdayDescriptions
+        : builtByWeekdayFromPeriods
+        ? WEEKDAY_DISPLAY_ORDER.map(
+            (d) =>
+              `${WEEKDAY_LABELS[d]}: ${formatRangesText(byWeekday[String(d)])}`
+          )
         : [`每日 ${openStr}–${closeStr}`],
     daily_hours:
       openStr && closeStr
-        ? { open: openStr, close: closeStr }
-        : { open: '10:00', close: '21:00' },
+        ? { open: openStr, close: closeStr, ...(closedDays ? { closed_days: closedDays } : {}) }
+        : { open: '10:00', close: '21:00', ...(closedDays ? { closed_days: closedDays } : {}) },
+    ...(builtByWeekdayFromPeriods ? { by_weekday: byWeekday } : {}),
   };
+
+  return normalizeOpeningHoursForStorage(base);
 }
 
 /**

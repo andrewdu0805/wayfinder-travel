@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SavedPlace } from '@/types/place';
+import { parseGoogleOpeningHours } from '@/lib/google-maps-enricher';
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
         googleMapsApiKey !== 'your-google-maps-api-key' &&
         place.google_place_id &&
         place.google_place_id.startsWith('ChIJ') &&
-        !place.google_place_id.includes('_')
+        !place.google_place_id.startsWith('ChIJ_')
       ) {
         try {
           const res = await fetch(
@@ -49,13 +50,11 @@ export async function POST(req: NextRequest) {
             if (detail.businessStatus) {
               nextBusinessStatus = detail.businessStatus;
             }
-            if (detail.regularOpeningHours?.weekdayDescriptions) {
-              nextHours = {
-                ...nextHours,
-                open_now: detail.regularOpeningHours.openNow ?? true,
-                weekday_descriptions:
-                  detail.regularOpeningHours.weekdayDescriptions,
-              };
+            const parsedHours = parseGoogleOpeningHours(
+              detail.regularOpeningHours
+            );
+            if (parsedHours) {
+              nextHours = parsedHours;
             }
           }
         } catch (err) {

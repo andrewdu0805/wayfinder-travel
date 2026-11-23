@@ -19,6 +19,11 @@ export interface CategoryConfig {
   updated_at?: string;
 }
 
+export interface OpeningPeriodRange {
+  open: string;  // "HH:MM"
+  close: string; // "HH:MM"
+}
+
 export interface OpeningHoursJson {
   open_now?: boolean;
   weekday_descriptions?: string[];
@@ -28,6 +33,11 @@ export interface OpeningHoursJson {
     close: string;
     closed_days?: number[]; // 0 = Sunday, 1 = Monday, ...
   };
+  /**
+   * Per-weekday structured opening ranges keyed by JS Date.getDay() ("0" = Sun .. "6" = Sat).
+   * Empty array [] means closed all day on that weekday.
+   */
+  by_weekday?: Record<string, OpeningPeriodRange[]>;
 }
 
 export interface SavedPlace {
