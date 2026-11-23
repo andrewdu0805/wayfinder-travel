@@ -55,6 +55,7 @@ interface SmartQuickAddBarProps {
 
 export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
   const {
+    places,
     categoryConfigs,
     settings,
     recentUpserts,
@@ -69,6 +70,7 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
   const [showFileImport, setShowFileImport] = useState(false);
   const [previewPlaces, setPreviewPlaces] = useState<SavedPlace[] | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [importInfoMsg, setImportInfoMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleSmartSubmit = async (overrideText?: string) => {
@@ -312,14 +314,65 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
           });
         }
 
-        // Batch Google Maps URL resolution: URL is the primary authority, exactly matching single URL paste!
+        // Deduplicate CSV rows against existing saved places BEFORE calling Google Maps API!
+        const normName = (s: string) =>
+          (s || '')
+            .replace(/\([^)]*\)|（[^）]*）|【[^】]*】/g, '')
+            .replace(/\s+/g, '')
+            .toLowerCase();
+        const extractUrlToken = (u: string) => {
+          const s2 = (u || '').match(/(0x[0-9a-f]{15,16}:0x[0-9a-f]+)/i);
+          if (s2) return s2[1].toLowerCase();
+          const cid = (u || '').match(/[?&]cid=([0-9]+)/);
+          if (cid) return `cid_${cid[1]}`;
+          return '';
+        };
+
+        const existingUrls = new Set<string>();
+        const existingTokens = new Set<string>();
+        const existingNames = new Set<string>();
+        for (const p of places) {
+          if (p.google_maps_url) {
+            existingUrls.add(p.google_maps_url.trim());
+            const tok = extractUrlToken(p.google_maps_url);
+            if (tok) existingTokens.add(tok);
+          }
+          if (p.google_place_id) {
+            existingTokens.add(p.google_place_id.trim().toLowerCase());
+          }
+          const nn = normName(p.name);
+          if (nn.length >= 2) existingNames.add(nn);
+        }
+
+        const newBatchRows = batchRows.filter((row) => {
+          const cleanUrl = (row.url || '').trim();
+          if (cleanUrl && existingUrls.has(cleanUrl)) return false;
+          const tok = extractUrlToken(cleanUrl);
+          if (tok && existingTokens.has(tok)) return false;
+          const nn = normName(row.title);
+          if (nn.length >= 2 && existingNames.has(nn)) return false;
+          return true;
+        });
+
+        const skippedExistingCount = batchRows.length - newBatchRows.length;
+        setImportInfoMsg(null);
+
+        if (newBatchRows.length === 0 && batchRows.length > 0) {
+          setImportInfoMsg(
+            `✅ 此 CSV 的 ${batchRows.length} 筆地點皆已存在於清單中，已自動全部略過（未消耗 Google Maps API 額度）！`
+          );
+          setShowFileImport(false);
+          return;
+        }
+
+        // Batch Google Maps URL resolution: ONLY query Google Maps API for newly added rows!
         setIsParsing(true);
         try {
           const res = await fetch('/api/smart-parse', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              batch: batchRows,
+              batch: newBatchRows,
               defaultCity: fallbackCity,
               categoryConfigs,
               googleMapsApiKey: settings.googleMapsApiKey,
@@ -339,8 +392,8 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
         }
 
         // If server was offline or returned empty, resolve locally with identical URL-first logic!
-        if (imported.length === 0 && batchRows.length > 0) {
-          for (const row of batchRows) {
+        if (imported.length === 0 && newBatchRows.length > 0) {
+          for (const row of newBatchRows) {
             const resolved = resolvePlaceFromGoogleMapsUrl({
               url: row.url,
               fallbackTitle: row.title,
@@ -352,6 +405,12 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
             });
             imported.push(resolved);
           }
+        }
+
+        if (skippedExistingCount > 0) {
+          setImportInfoMsg(
+            `💡 已自動略過清單中原本就有的 ${skippedExistingCount} 筆地點，僅對 ${newBatchRows.length} 筆新地點查詢 Google Maps！`
+          );
         }
       }
 
@@ -516,6 +575,20 @@ export function SmartQuickAddBar({ activeCity }: SmartQuickAddBarProps) {
       {errorMsg && (
         <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-base font-bold text-red-700">
           {errorMsg}
+        </div>
+      )}
+
+      {importInfoMsg && (
+        <div className="flex items-center justify-between gap-2 rounded-xl bg-teal-50 border border-teal-200 px-4 py-2.5 text-sm font-bold text-teal-900">
+          <span>{importInfoMsg}</span>
+          <button
+            type="button"
+            onClick={() => setImportInfoMsg(null)}
+            className="rounded-lg p-1 text-teal-700 hover:bg-teal-100 cursor-pointer shrink-0"
+            title="關閉提示"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 
