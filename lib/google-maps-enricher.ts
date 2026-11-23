@@ -582,69 +582,166 @@ export async function enrichPlaceFromGoogleMapsUrl(
   }
   if (hasValidMapsKey) {
     try {
-      // Do NOT include potentially-wrong old district in textQuery; rely on city + exact URL locationBias!
-      const textQuery = `${next.name} ${next.city}`.trim();
-      const requestBody: Record<string, unknown> = {
-        textQuery,
-        languageCode: 'zh-TW',
+      const formatPlacesErrorDiagnostic = (
+        status: number,
+        rawErrMsg?: string
+      ): string => {
+        if (status === 429) {
+          return '⚠️ Google Places API 配額已達上限（HTTP 429），已立即停止重試以節省額度，請稍後再試或檢查 Google Cloud 配額設定';
+        }
+        if (status === 403 || status === 401) {
+          return `⚠️ Google Places API 金鑰權限不足或受限（HTTP ${status}），已停止重試，請檢查 API Key 與 Places API (New) 設定`;
+        }
+        return `Google Places API 連線失敗（HTTP ${status}${
+          rawErrMsg ? `: ${rawErrMsg.slice(0, 80)}` : ''
+        }）`;
       };
-      if (next.latitude && next.longitude && next.latitude > 20 && next.latitude < 27) {
-        requestBody.locationBias = {
-          circle: {
-            center: { latitude: next.latitude, longitude: next.longitude },
-            radius: 2500.0,
-          },
-        };
-      }
 
-      const extendedMask =
+      const existingPlaceId = (next.google_place_id || '').trim();
+      const hasRealPlaceId =
+        existingPlaceId.startsWith('ChIJ') &&
+        !existingPlaceId.startsWith('ChIJ_') &&
+        existingPlaceId.length >= 20;
+
+      const detailExtendedMask =
+        'id,displayName,formattedAddress,addressComponents,location,rating,regularOpeningHours,currentOpeningHours,googleMapsUri,businessStatus,primaryType,types,primaryTypeDisplayName,reviewSummary,generativeSummary,editorialSummary,reviews';
+      const detailSafeCoreMask =
+        'id,displayName,formattedAddress,addressComponents,location,rating,regularOpeningHours,businessStatus,primaryType,types,editorialSummary';
+      const detailMinimalMask =
+        'id,displayName,formattedAddress,location,rating,regularOpeningHours,businessStatus,types';
+
+      const searchExtendedMask =
         'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri,places.businessStatus,places.primaryType,places.types,places.primaryTypeDisplayName,places.reviewSummary,places.generativeSummary,places.editorialSummary,places.reviews';
-      const safeCoreMask =
+      const searchSafeCoreMask =
         'places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.primaryType,places.types,places.editorialSummary';
-      const minimalMask =
+      const searchMinimalMask =
         'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.types';
 
-      const tryMasks = [extendedMask, safeCoreMask, minimalMask];
-      let placesRes: Response | null = null;
-      let lastErrStatus = '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let top: any = null;
+      let stoppedByQuotaOrAuth = false;
+      let lastFailedRes: Response | null = null;
 
-      for (const mask of tryMasks) {
-        placesRes = await fetch(
-          'https://places.googleapis.com/v1/places:searchText',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Goog-Api-Key': googleMapsApiKey!,
-              'X-Goog-FieldMask': mask,
-            },
-            body: JSON.stringify(requestBody),
-            signal: AbortSignal.timeout(5000),
+      // Step 2a: If we already have a real ChIJ google_place_id, prefer Place Details API (lower cost & exact match)
+      if (hasRealPlaceId) {
+        const detailMasks = [
+          detailExtendedMask,
+          detailSafeCoreMask,
+          detailMinimalMask,
+        ];
+        for (const mask of detailMasks) {
+          const detailRes = await fetch(
+            `https://places.googleapis.com/v1/places/${encodeURIComponent(
+              existingPlaceId
+            )}?languageCode=zh-TW`,
+            {
+              method: 'GET',
+              headers: {
+                'X-Goog-Api-Key': googleMapsApiKey!,
+                'X-Goog-FieldMask': mask,
+              },
+              signal: AbortSignal.timeout(5000),
+            }
+          );
+          if (detailRes.ok) {
+            top = await detailRes.json();
+            lastFailedRes = null;
+            break;
           }
-        );
-        if (placesRes.ok) break;
-        lastErrStatus = `HTTP ${placesRes.status}`;
-        // If 403 (API key / permission issue), retrying another mask won't help
-        if (placesRes.status === 403 || placesRes.status === 401) break;
+          lastFailedRes = detailRes;
+          if (
+            detailRes.status === 429 ||
+            detailRes.status === 403 ||
+            detailRes.status === 401
+          ) {
+            stoppedByQuotaOrAuth = true;
+            break;
+          }
+          // 404 means place ID no longer exists; break out to allow searchText fallback
+          if (detailRes.status === 404) break;
+        }
       }
 
-      if (placesRes && !placesRes.ok) {
-        let errDetail = lastErrStatus;
+      // Step 2b: Fall back to Places Text Search only if Place Details didn't succeed AND we didn't hit 429/403/401
+      if (!top && !stoppedByQuotaOrAuth) {
+        // Do NOT include potentially-wrong old district in textQuery; rely on city + exact URL locationBias!
+        const textQuery = `${next.name} ${next.city}`.trim();
+        const requestBody: Record<string, unknown> = {
+          textQuery,
+          languageCode: 'zh-TW',
+        };
+        if (
+          next.latitude &&
+          next.longitude &&
+          next.latitude > 20 &&
+          next.latitude < 27
+        ) {
+          requestBody.locationBias = {
+            circle: {
+              center: { latitude: next.latitude, longitude: next.longitude },
+              radius: 2500.0,
+            },
+          };
+        }
+
+        const tryMasks = [
+          searchExtendedMask,
+          searchSafeCoreMask,
+          searchMinimalMask,
+        ];
+
+        for (const mask of tryMasks) {
+          const placesRes = await fetch(
+            'https://places.googleapis.com/v1/places:searchText',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': googleMapsApiKey!,
+                'X-Goog-FieldMask': mask,
+              },
+              body: JSON.stringify(requestBody),
+              signal: AbortSignal.timeout(5000),
+            }
+          );
+          if (placesRes.ok) {
+            const data = await placesRes.json();
+            top = data.places?.[0] || null;
+            lastFailedRes = null;
+            break;
+          }
+          lastFailedRes = placesRes;
+          // Immediately stop retrying on HTTP 429 (quota) / 403 / 401 (auth/permission)
+          if (
+            placesRes.status === 429 ||
+            placesRes.status === 403 ||
+            placesRes.status === 401
+          ) {
+            stoppedByQuotaOrAuth = true;
+            break;
+          }
+        }
+      }
+
+      if (!top && lastFailedRes) {
+        let rawErrMsg = '';
         try {
-          const errJson = await placesRes.json();
+          const errJson = await lastFailedRes.json();
           if (errJson?.error?.message) {
-            errDetail = `${lastErrStatus}: ${String(errJson.error.message).slice(0, 80)}`;
+            rawErrMsg = String(errJson.error.message);
           }
         } catch {}
-        console.warn('Google Places API failed:', errDetail);
+        const diagMsg = formatPlacesErrorDiagnostic(
+          lastFailedRes.status,
+          rawErrMsg
+        );
+        console.warn('Google Places API failed:', lastFailedRes.status, rawErrMsg);
         (next as SavedPlace & { _syncDiagnostic?: string })._syncDiagnostic =
-          `Google Places API 連線失敗（${errDetail}）`;
+          diagMsg;
       }
 
-      if (placesRes && placesRes.ok) {
-        const data = await placesRes.json();
-        const top = data.places?.[0];
-        if (top) {
+      if (top) {
+        {
           // Only enforce strict 4km guard if URL actually had exact pin coordinates;
           // otherwise allow up to 25km so rough district centroids never reject the real Google Maps venue!
           const hadExactUrlCoords = Boolean(

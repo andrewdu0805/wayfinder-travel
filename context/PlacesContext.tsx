@@ -34,7 +34,154 @@ const STORAGE_KEYS = {
   PLACES: 'antigravity_travel_places_v1',
   CATEGORIES: 'antigravity_travel_categories_v1',
   SETTINGS: 'antigravity_travel_settings_v1',
+  DELETED_PLACES: 'antigravity_deleted_places_v1',
+  DELETED_CATEGORIES: 'antigravity_deleted_categories_v1',
+  LAST_SYNCED_PLACE_IDS: 'antigravity_last_synced_place_ids_v1',
+  LAST_SYNCED_AT: 'antigravity_last_synced_at_v1',
+  HAS_SYNCED_ONCE: 'antigravity_has_synced_once_v1',
+  HAS_LOCAL_MUTATION: 'antigravity_has_local_mutation_v1',
 };
+
+const DEFAULT_PLACE_MAP = new Map<string, SavedPlace>(
+  INITIAL_SAVED_PLACES.map((p) => [p.google_place_id, p])
+);
+
+const DEFAULT_CATEGORY_MAP = new Map<string, CategoryConfig>(
+  DEFAULT_CATEGORY_CONFIGS.map((c) => [c.sub_category, c])
+);
+
+function toCanonicalGooglePlaceId(p: SavedPlace): string {
+  const raw = (p.google_place_id || '').trim();
+  return raw || `local_${p.id}`;
+}
+
+function parseTimestampMs(iso?: string | null): number {
+  if (!iso) return 0;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function isUnmodifiedDefaultPlace(p: SavedPlace): boolean {
+  const def = DEFAULT_PLACE_MAP.get(p.google_place_id);
+  if (!def) return false;
+  return (
+    p.name === def.name &&
+    p.visit_status === def.visit_status &&
+    p.user_notes === def.user_notes &&
+    p.sub_category === def.sub_category &&
+    p.primary_category === def.primary_category &&
+    p.estimated_stay_mins === def.estimated_stay_mins &&
+    p.formatted_address === def.formatted_address &&
+    JSON.stringify(p.custom_tags || []) === JSON.stringify(def.custom_tags || [])
+  );
+}
+
+function isUnmodifiedDefaultCategory(c: CategoryConfig): boolean {
+  const def = DEFAULT_CATEGORY_MAP.get(c.sub_category);
+  if (!def) return false;
+  return (
+    c.primary_category === def.primary_category &&
+    c.primary_label === def.primary_label &&
+    c.sub_label === def.sub_label &&
+    c.default_stay_mins === def.default_stay_mins &&
+    c.sort_order === def.sort_order
+  );
+}
+
+function placeToSupabaseRow(p: SavedPlace) {
+  const lat =
+    typeof p.latitude === 'number' && Number.isFinite(p.latitude)
+      ? p.latitude
+      : 22.9918;
+  const lng =
+    typeof p.longitude === 'number' && Number.isFinite(p.longitude)
+      ? p.longitude
+      : 120.2008;
+  const nowIso = new Date().toISOString();
+  return {
+    google_place_id: toCanonicalGooglePlaceId(p),
+    name: p.name,
+    formatted_address: p.formatted_address || '',
+    country: p.country || '台灣',
+    city: p.city || '台南市',
+    district: p.district || '',
+    location: `SRID=4326;POINT(${lng} ${lat})`,
+    primary_category: p.primary_category || 'restaurant',
+    sub_category: p.sub_category || 'meal',
+    visit_status: p.visit_status || 'unvisited',
+    business_status: p.business_status || 'OPERATIONAL',
+    estimated_stay_mins: Math.max(
+      5,
+      Math.round(Number(p.estimated_stay_mins) || 60)
+    ),
+    rating:
+      typeof p.rating === 'number' && Number.isFinite(p.rating)
+        ? Number(p.rating.toFixed(1))
+        : null,
+    opening_hours_json: p.opening_hours_json ?? null,
+    google_maps_url: p.google_maps_url || '',
+    user_notes: p.user_notes || '',
+    custom_tags: Array.isArray(p.custom_tags) ? p.custom_tags : [],
+    last_visited_at: p.last_visited_at
+      ? String(p.last_visited_at).slice(0, 10)
+      : null,
+    hours_updated_at: p.hours_updated_at || nowIso,
+    created_at: p.created_at || nowIso,
+    updated_at: p.updated_at || nowIso,
+  };
+}
+
+function supabaseRowToPlace(row: Record<string, unknown>): SavedPlace {
+  const nowIso = new Date().toISOString();
+  const visitStatus =
+    row.visit_status === 'visited_revisit' ||
+    row.visit_status === 'visited_skip'
+      ? row.visit_status
+      : 'unvisited';
+  const businessStatus =
+    row.business_status === 'CLOSED_TEMPORARILY' ||
+    row.business_status === 'CLOSED_PERMANENTLY'
+      ? row.business_status
+      : 'OPERATIONAL';
+
+  return {
+    id: String(row.id || `sb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+    google_place_id: String(row.google_place_id || row.id || ''),
+    name: String(row.name || '未命名地點'),
+    formatted_address: String(row.formatted_address || ''),
+    country: String(row.country || '台灣'),
+    city: String(row.city || '台南市'),
+    district: String(row.district || ''),
+    latitude:
+      typeof row.latitude === 'number'
+        ? row.latitude
+        : Number(row.latitude) || 22.9918,
+    longitude:
+      typeof row.longitude === 'number'
+        ? row.longitude
+        : Number(row.longitude) || 120.2008,
+    primary_category: String(row.primary_category || 'restaurant'),
+    sub_category: String(row.sub_category || 'meal'),
+    visit_status: visitStatus,
+    business_status: businessStatus,
+    estimated_stay_mins: Number(row.estimated_stay_mins) || 60,
+    rating:
+      row.rating !== null && row.rating !== undefined && !Number.isNaN(Number(row.rating))
+        ? Number(row.rating)
+        : null,
+    opening_hours_json:
+      (row.opening_hours_json as SavedPlace['opening_hours_json']) || null,
+    google_maps_url: String(row.google_maps_url || ''),
+    user_notes: String(row.user_notes || ''),
+    custom_tags: Array.isArray(row.custom_tags)
+      ? row.custom_tags.map(String)
+      : [],
+    last_visited_at: row.last_visited_at ? String(row.last_visited_at) : null,
+    hours_updated_at: String(row.hours_updated_at || nowIso),
+    created_at: String(row.created_at || nowIso),
+    updated_at: String(row.updated_at || nowIso),
+  };
+}
 
 const DEFAULT_SETTINGS: AppSettings = {
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -61,7 +208,11 @@ interface PlacesContextValue {
   recentUpserts: UpsertActionRecord[];
   isHydrated: boolean;
   isSyncing: boolean;
+  isSupabaseConfigured: boolean;
   lastSyncMessage: string | null;
+  lastSyncError: string | null;
+  lastSyncedAt: string | null;
+  clearSyncFeedback: () => void;
   isAuditingPlaces: boolean;
   auditProgress: PlaceAuditProgress | null;
   clearAuditProgress: () => void;
@@ -69,6 +220,10 @@ interface PlacesContextValue {
     targetCity?: string
   ) => Promise<{ totalChecked: number; fixedCount: number }>;
   smartUpsertPlaces: (incoming: SavedPlace[]) => UpsertActionRecord[];
+  importPlacesFromJson: (
+    incoming: SavedPlace[],
+    incomingCategories?: CategoryConfig[]
+  ) => number;
   updatePlaceInline: (id: string, patch: Partial<SavedPlace>) => void;
   deletePlace: (id: string) => void;
   clearRecentUpserts: () => void;
@@ -396,14 +551,98 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncMessage, setLastSyncMessage] = useState<string | null>(null);
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [isAuditingPlaces, setIsAuditingPlaces] = useState(false);
   const [auditProgress, setAuditProgress] = useState<PlaceAuditProgress | null>(
     null
   );
-  const enrichedIdsRef = React.useRef<Set<string>>(new Set());
-  const isEnrichingRef = React.useRef<boolean>(false);
-  const autoAuditTriggeredRef = React.useRef<boolean>(false);
+
+  const placesRef = React.useRef<SavedPlace[]>(places);
+  const categoryConfigsRef = React.useRef<CategoryConfig[]>(categoryConfigs);
+  const settingsRef = React.useRef<AppSettings>(settings);
+  const isSyncingRef = React.useRef<boolean>(false);
+  const lastSyncCompletedAtRef = React.useRef<number>(0);
+  const initialSyncTriggeredRef = React.useRef<boolean>(false);
+  const autoPushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const deletedPlaceIdsRef = React.useRef<Set<string>>(new Set());
+  const deletedCategorySubsRef = React.useRef<Set<string>>(new Set());
+  const syncWithSupabaseRef = React.useRef<
+    (() => Promise<{ ok: boolean; message: string }>) | null
+  >(null);
+
+  useEffect(() => {
+    placesRef.current = places;
+  }, [places]);
+
+  useEffect(() => {
+    categoryConfigsRef.current = categoryConfigs;
+  }, [categoryConfigs]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  const isSupabaseConfigured = useMemo(
+    () =>
+      Boolean(
+        settings.supabaseUrl?.trim() &&
+          settings.supabaseAnonKey?.trim() &&
+          !settings.supabaseUrl.includes('your-project-id')
+      ),
+    [settings.supabaseUrl, settings.supabaseAnonKey]
+  );
+
+  const isSupabaseConfiguredRef = React.useRef<boolean>(isSupabaseConfigured);
+  useEffect(() => {
+    isSupabaseConfiguredRef.current = isSupabaseConfigured;
+  }, [isSupabaseConfigured]);
+
   const clearAuditProgress = useCallback(() => setAuditProgress(null), []);
+  const clearSyncFeedback = useCallback(() => {
+    setLastSyncMessage(null);
+    setLastSyncError(null);
+  }, []);
+
+  const persistDeletedQueues = useCallback(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.DELETED_PLACES,
+        JSON.stringify(Array.from(deletedPlaceIdsRef.current))
+      );
+      localStorage.setItem(
+        STORAGE_KEYS.DELETED_CATEGORIES,
+        JSON.stringify(Array.from(deletedCategorySubsRef.current))
+      );
+    } catch {}
+  }, []);
+
+  const scheduleAutoPush = useCallback(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.HAS_LOCAL_MUTATION, '1');
+    } catch {}
+    if (!isSupabaseConfiguredRef.current) return;
+    if (autoPushTimerRef.current) {
+      clearTimeout(autoPushTimerRef.current);
+    }
+    autoPushTimerRef.current = setTimeout(() => {
+      autoPushTimerRef.current = null;
+      if (syncWithSupabaseRef.current) {
+        void syncWithSupabaseRef.current();
+      }
+    }, 1500);
+  }, []);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoPushTimerRef.current) {
+        clearTimeout(autoPushTimerRef.current);
+      }
+    };
+  }, []);
 
   // Hydrate from localStorage on client mount
   useEffect(() => {
@@ -414,7 +653,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         if (Array.isArray(parsed)) {
           const sanitized = parsed.map(sanitizePlaceRecord);
           setPlaces(sanitized);
-          // Also sync repaired records back to recentUpserts if any
+          placesRef.current = sanitized;
         }
       }
       const rawCats = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
@@ -434,25 +673,65 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
             (a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99)
           );
           setCategoryConfigs(mergedCats);
+          categoryConfigsRef.current = mergedCats;
         }
       }
+      const rawDeletedPlaces = localStorage.getItem(
+        STORAGE_KEYS.DELETED_PLACES
+      );
+      if (rawDeletedPlaces) {
+        const parsedDel = JSON.parse(rawDeletedPlaces);
+        if (Array.isArray(parsedDel)) {
+          deletedPlaceIdsRef.current = new Set(parsedDel.map(String));
+        }
+      }
+      const rawDeletedCats = localStorage.getItem(
+        STORAGE_KEYS.DELETED_CATEGORIES
+      );
+      if (rawDeletedCats) {
+        const parsedDelCats = JSON.parse(rawDeletedCats);
+        if (Array.isArray(parsedDelCats)) {
+          deletedCategorySubsRef.current = new Set(parsedDelCats.map(String));
+        }
+      }
+      const storedLastSyncedAt = localStorage.getItem(
+        STORAGE_KEYS.LAST_SYNCED_AT
+      );
+      if (storedLastSyncedAt) {
+        setLastSyncedAt(storedLastSyncedAt);
+      }
+
       const rawSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (rawSettings) {
         const parsedSettings = JSON.parse(rawSettings);
-        setSettings((prev) => ({
-          ...prev,
-          ...parsedSettings,
-          googleMapsApiKey:
-            parsedSettings.googleMapsApiKey?.trim() ||
-            prev.googleMapsApiKey ||
-            process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
-            '',
-          geminiApiKey:
-            parsedSettings.geminiApiKey?.trim() ||
-            prev.geminiApiKey ||
-            process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
-            '',
-        }));
+        setSettings((prev) => {
+          const nextSettings = {
+            ...prev,
+            ...parsedSettings,
+            supabaseUrl:
+              parsedSettings.supabaseUrl?.trim() ||
+              prev.supabaseUrl ||
+              process.env.NEXT_PUBLIC_SUPABASE_URL ||
+              '',
+            supabaseAnonKey:
+              parsedSettings.supabaseAnonKey?.trim() ||
+              prev.supabaseAnonKey ||
+              process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+              '',
+            googleMapsApiKey:
+              parsedSettings.googleMapsApiKey?.trim() ||
+              prev.googleMapsApiKey ||
+              process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+              '',
+            geminiApiKey:
+              parsedSettings.geminiApiKey?.trim() ||
+              prev.geminiApiKey ||
+              process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
+              '',
+          };
+          settingsRef.current = nextSettings;
+          return nextSettings;
+        });
       }
 
       // Check for sync_keys in URL (e.g. from scanning PC QR code)
@@ -485,6 +764,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                     ? { supabaseAnonKey: String(synced.supabaseAnonKey).trim() }
                     : {}),
                 };
+                settingsRef.current = updated;
                 try {
                   localStorage.setItem(
                     STORAGE_KEYS.SETTINGS,
@@ -513,197 +793,6 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       setIsHydrated(true);
     }
   }, []);
-
-  // Automatically verify & enrich imported places in the background
-  // using exact Google Maps URLs, Places API addressComponents, and Taiwan district polygons
-  useEffect(() => {
-    if (!isHydrated || isEnrichingRef.current) return;
-
-    const unenriched = places.filter((p) => {
-      if (enrichedIdsRef.current.has(p.id)) return false;
-      const isImported =
-        p.id?.startsWith('csv-') ||
-        p.id?.startsWith('takeout-') ||
-        p.id?.startsWith('gmaps-') ||
-        p.google_place_id?.startsWith('csv_') ||
-        p.google_place_id?.startsWith('takeout_') ||
-        p.google_place_id?.startsWith('gmaps_') ||
-        p.custom_tags?.includes('#CSV匯入') ||
-        p.custom_tags?.includes('#Takeout匯入') ||
-        p.custom_tags?.includes('#GoogleMaps匯入');
-
-      const needsAddress = !/[路街段巷弄號大道]/.test(p.formatted_address || '');
-      const needsHours =
-        isImported &&
-        (!p.opening_hours_json?.weekday_descriptions?.length ||
-          (p.opening_hours_json.weekday_descriptions.length === 1 &&
-            p.opening_hours_json.weekday_descriptions[0] === '每日 10:00–21:00'));
-      const needsEnglishNoteFix = Boolean(
-        p.user_notes &&
-          p.user_notes.trim().length > 10 &&
-          !/[\u4e00-\u9fff]/.test(p.user_notes)
-      );
-      const needsNote =
-        needsEnglishNoteFix ||
-        (isImported &&
-          (!p.user_notes ||
-            p.user_notes.includes('參觀者表示這座文化展館的展覽內容豐富且策展用心') ||
-            p.user_notes.includes('顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食') ||
-            p.user_notes.includes('顧客表示這家酒吧提供美味又獨特的調酒與豐富飲品')));
-      // Check if formatted_address explicitly specifies a DIFFERENT district than p.district
-      const addrDistMatch = (p.formatted_address || '').match(
-        /(?:台北市|臺北市|新北市|桃園市|台中市|臺中市|台南市|臺南市|高雄市|基隆市|新竹市|新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義市|嘉義縣|屏東縣|宜蘭縣|花蓮縣|台東縣|臺東縣|澎湖縣|金門縣)\s*([^\d\s,，。、]{1,3}?[區市鎮鄉])/
-      );
-      const hasDistrictMismatch = Boolean(
-        addrDistMatch && addrDistMatch[1] && addrDistMatch[1] !== p.district
-      );
-
-      return needsAddress || needsHours || needsNote || hasDistrictMismatch;
-    });
-
-    if (unenriched.length === 0) return;
-
-    isEnrichingRef.current = true;
-    (async () => {
-      try {
-        for (const item of unenriched) {
-          if (enrichedIdsRef.current.has(item.id)) continue;
-          enrichedIdsRef.current.add(item.id);
-          try {
-            const res = await fetch('/api/smart-parse', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                batch: [
-                  {
-                    url: item.google_maps_url || '',
-                    title: item.name,
-                    note: '',
-                    rowCoords:
-                      item.latitude && item.longitude
-                        ? { lat: item.latitude, lng: item.longitude }
-                        : null,
-                  },
-                ],
-                defaultCity: item.city || '',
-                categoryConfigs,
-                geminiApiKey: settings.geminiApiKey,
-                googleMapsApiKey: settings.googleMapsApiKey,
-              }),
-            });
-            if (!res.ok) continue;
-            const data = await res.json();
-            const enriched: SavedPlace | undefined = data.places?.[0];
-
-            if (enriched) {
-              const applyEnriched = (p: SavedPlace): SavedPlace => {
-                const hasRealEnrichedAddr = /[路街段巷弄號大道]/.test(
-                  enriched.formatted_address || ''
-                );
-                const nextAddr = hasRealEnrichedAddr
-                  ? enriched.formatted_address
-                  : p.formatted_address || enriched.formatted_address;
-
-                const isDefaultHours = (
-                  h?: SavedPlace['opening_hours_json']
-                ) =>
-                  !h?.weekday_descriptions?.length ||
-                  (h.weekday_descriptions.length === 1 &&
-                    h.weekday_descriptions[0] === '每日 10:00–21:00');
-                const nextHours =
-                  !isDefaultHours(enriched.opening_hours_json) ||
-                  isDefaultHours(p.opening_hours_json)
-                    ? enriched.opening_hours_json || p.opening_hours_json
-                    : p.opening_hours_json;
-
-                // Never downgrade a specific non-meal category back to generic 'meal'
-                const shouldKeepOrigCat =
-                  p.sub_category !== 'meal' && enriched.sub_category === 'meal';
-                const nextPrimary = shouldKeepOrigCat
-                  ? p.primary_category
-                  : enriched.primary_category || p.primary_category;
-                const nextSub = shouldKeepOrigCat
-                  ? p.sub_category
-                  : enriched.sub_category || p.sub_category;
-                const nextStay = shouldKeepOrigCat
-                  ? p.estimated_stay_mins
-                  : enriched.estimated_stay_mins || p.estimated_stay_mins;
-
-                const origNote = (p.user_notes || '').trim();
-                const enrichedNote = (enriched.user_notes || '').trim();
-                const isEnrichedGenericRestaurant =
-                  enrichedNote.includes(
-                    '顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食'
-                  ) ||
-                  (nextPrimary !== 'restaurant' &&
-                    enrichedNote.includes('這家餐廳的餐點美味'));
-                const isOrigBad =
-                  !origNote ||
-                  (origNote.length > 10 && !/[\u4e00-\u9fff]/.test(origNote)) ||
-                  origNote.includes('顧客表示這家餐廳的餐點美味又份量充足，特別是招牌主食') ||
-                  (nextPrimary !== 'restaurant' &&
-                    origNote.includes('這家餐廳的餐點美味'));
-
-                const nextNotes =
-                  isOrigBad && enrichedNote && !isEnrichedGenericRestaurant
-                    ? enrichedNote
-                    : isOrigBad
-                    ? resolvePlaceDescription(
-                        enriched.name || p.name,
-                        enriched.city || p.city,
-                        enriched.district || p.district,
-                        nextSub,
-                        nextAddr
-                      )
-                    : origNote;
-
-                return {
-                  ...p,
-                  name: enriched.name || p.name,
-                  google_place_id:
-                    enriched.google_place_id || p.google_place_id,
-                  formatted_address: nextAddr,
-                  country: enriched.country || p.country,
-                  city: enriched.city || p.city,
-                  district: enriched.district || p.district,
-                  latitude: enriched.latitude || p.latitude,
-                  longitude: enriched.longitude || p.longitude,
-                  primary_category: nextPrimary,
-                  sub_category: nextSub,
-                  estimated_stay_mins: nextStay,
-                  rating: enriched.rating ?? p.rating,
-                  business_status:
-                    enriched.business_status || p.business_status,
-                  opening_hours_json: nextHours,
-                  user_notes: nextNotes,
-                };
-              };
-              setPlaces((prev) =>
-                prev.map((p) => (p.id === item.id ? applyEnriched(p) : p))
-              );
-              setRecentUpserts((prev) =>
-                prev.map((rec) =>
-                  rec.place.id === item.id
-                    ? { ...rec, place: applyEnriched(rec.place) }
-                    : rec
-                )
-              );
-            }
-          } catch {
-            // ignore individual lookup errors
-          }
-        }
-      } finally {
-        isEnrichingRef.current = false;
-      }
-    })();
-  }, [
-    isHydrated,
-    places,
-    categoryConfigs,
-    settings.geminiApiKey,
-    settings.googleMapsApiKey,
-  ]);
 
   // Persist places to localStorage
   useEffect(() => {
@@ -748,12 +837,19 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
     (incoming: SavedPlace[]): UpsertActionRecord[] => {
       const nowIso = new Date().toISOString();
       const records: UpsertActionRecord[] = [];
+      let deletedQueueChanged = false;
 
       setPlaces((prevPlaces) => {
         const nextList = [...prevPlaces];
 
         for (const rawItem of incoming) {
           const item = sanitizePlaceRecord(rawItem);
+          const canonicalKey = toCanonicalGooglePlaceId(item);
+          if (deletedPlaceIdsRef.current.has(canonicalKey)) {
+            deletedPlaceIdsRef.current.delete(canonicalKey);
+            deletedQueueChanged = true;
+          }
+
           const normIncoming = normalizePlaceName(item.name);
           const existingIdx = nextList.findIndex(
             (p) =>
@@ -814,7 +910,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
             const newPlace: SavedPlace = {
               ...item,
               hours_updated_at: nowIso,
-              created_at: nowIso,
+              created_at: item.created_at || nowIso,
               updated_at: nowIso,
             };
             nextList.unshift(newPlace);
@@ -825,20 +921,107 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        placesRef.current = nextList;
         return nextList;
       });
 
+      if (deletedQueueChanged) {
+        persistDeletedQueues();
+      }
       setRecentUpserts(records);
+      if (incoming.length > 0) {
+        scheduleAutoPush();
+      }
       return records;
     },
-    []
+    [persistDeletedQueues, scheduleAutoPush]
+  );
+
+  const importPlacesFromJson = useCallback(
+    (
+      incoming: SavedPlace[],
+      incomingCategories?: CategoryConfig[]
+    ): number => {
+      const validPlaces = incoming.filter(
+        (p) => p && typeof p === 'object' && typeof p.name === 'string' && p.name.trim()
+      );
+      if (validPlaces.length === 0 && (!incomingCategories || incomingCategories.length === 0)) {
+        return 0;
+      }
+
+      const nowIso = new Date().toISOString();
+
+      if (validPlaces.length > 0) {
+        let deletedQueueChanged = false;
+        setPlaces((prevPlaces) => {
+          const byKey = new Map<string, SavedPlace>();
+          for (const p of prevPlaces) {
+            byKey.set(toCanonicalGooglePlaceId(p), p);
+          }
+
+          for (const rawItem of validPlaces) {
+            const sanitized = sanitizePlaceRecord({
+              ...rawItem,
+              id:
+                rawItem.id ||
+                `json-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              google_place_id:
+                rawItem.google_place_id ||
+                `json_${rawItem.name.replace(/\s+/g, '_').toLowerCase()}`,
+              updated_at: nowIso,
+              created_at: rawItem.created_at || nowIso,
+              hours_updated_at: rawItem.hours_updated_at || nowIso,
+            });
+            const key = toCanonicalGooglePlaceId(sanitized);
+            if (deletedPlaceIdsRef.current.has(key)) {
+              deletedPlaceIdsRef.current.delete(key);
+              deletedQueueChanged = true;
+            }
+            byKey.set(key, sanitized);
+          }
+
+          const merged = Array.from(byKey.values());
+          placesRef.current = merged;
+          return merged;
+        });
+
+        if (deletedQueueChanged) {
+          persistDeletedQueues();
+        }
+      }
+
+      if (Array.isArray(incomingCategories) && incomingCategories.length > 0) {
+        setCategoryConfigs((prev) => {
+          const bySub = new Map<string, CategoryConfig>();
+          for (const c of prev) {
+            bySub.set(c.sub_category, c);
+          }
+          for (const c of incomingCategories) {
+            if (c && c.sub_category && c.sub_label) {
+              deletedCategorySubsRef.current.delete(c.sub_category);
+              bySub.set(c.sub_category, { ...c, updated_at: nowIso });
+            }
+          }
+          const mergedCats = Array.from(bySub.values()).sort(
+            (a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99)
+          );
+          categoryConfigsRef.current = mergedCats;
+          return mergedCats;
+        });
+        persistDeletedQueues();
+      }
+
+      scheduleAutoPush();
+      return validPlaces.length;
+    },
+    [persistDeletedQueues, scheduleAutoPush]
   );
 
   const updatePlaceInline = useCallback(
     (id: string, patch: Partial<SavedPlace>) => {
       const nowIso = new Date().toISOString();
-      setPlaces((prev) =>
-        prev.map((p) => {
+      setPlaces((prev) => {
+        const next = prev.map((p) => {
           if (p.id !== id) return p;
           // If sub_category changed and estimated_stay_mins wasn't explicitly patched, update default stay mins
           let nextStay = patch.estimated_stay_mins ?? p.estimated_stay_mins;
@@ -867,8 +1050,10 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
             last_visited_at: nextLastVisited,
             updated_at: nowIso,
           };
-        })
-      );
+        });
+        placesRef.current = next;
+        return next;
+      });
 
       setRecentUpserts((prev) =>
         prev.map((rec) =>
@@ -884,14 +1069,28 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
             : rec
         )
       );
+      scheduleAutoPush();
     },
-    [categoryConfigs]
+    [categoryConfigs, scheduleAutoPush]
   );
 
-  const deletePlace = useCallback((id: string) => {
-    setPlaces((prev) => prev.filter((p) => p.id !== id));
-    setRecentUpserts((prev) => prev.filter((r) => r.place.id !== id));
-  }, []);
+  const deletePlace = useCallback(
+    (id: string) => {
+      const target = placesRef.current.find((p) => p.id === id);
+      if (target) {
+        deletedPlaceIdsRef.current.add(toCanonicalGooglePlaceId(target));
+        persistDeletedQueues();
+      }
+      setPlaces((prev) => {
+        const next = prev.filter((p) => p.id !== id);
+        placesRef.current = next;
+        return next;
+      });
+      setRecentUpserts((prev) => prev.filter((r) => r.place.id !== id));
+      scheduleAutoPush();
+    },
+    [persistDeletedQueues, scheduleAutoPush]
+  );
 
   const clearRecentUpserts = useCallback(() => {
     setRecentUpserts([]);
@@ -904,39 +1103,71 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         .toLowerCase()
         .replace(/\s+/g, '_');
       const id = `${config.primary_category}:${cleanSub}`;
+      const nowIso = new Date().toISOString();
+      if (deletedCategorySubsRef.current.has(cleanSub)) {
+        deletedCategorySubsRef.current.delete(cleanSub);
+        persistDeletedQueues();
+      }
       setCategoryConfigs((prev) => {
         if (prev.some((c) => c.sub_category === cleanSub)) {
           return prev;
         }
-        return [
+        const next = [
           ...prev,
           {
             ...config,
             sub_category: cleanSub,
             id,
             sort_order: prev.length * 10 + 10,
+            updated_at: nowIso,
           },
         ];
+        categoryConfigsRef.current = next;
+        return next;
       });
+      scheduleAutoPush();
     },
-    []
+    [persistDeletedQueues, scheduleAutoPush]
   );
 
   const updateCategoryConfig = useCallback(
     (id: string, patch: Partial<CategoryConfig>) => {
-      setCategoryConfigs((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, ...patch } : c))
-      );
+      const nowIso = new Date().toISOString();
+      setCategoryConfigs((prev) => {
+        const next = prev.map((c) =>
+          c.id === id ? { ...c, ...patch, updated_at: nowIso } : c
+        );
+        categoryConfigsRef.current = next;
+        return next;
+      });
+      scheduleAutoPush();
     },
-    []
+    [scheduleAutoPush]
   );
 
-  const deleteCategoryConfig = useCallback((id: string) => {
-    setCategoryConfigs((prev) => prev.filter((c) => c.id !== id));
-  }, []);
+  const deleteCategoryConfig = useCallback(
+    (id: string) => {
+      const target = categoryConfigsRef.current.find((c) => c.id === id);
+      if (target) {
+        deletedCategorySubsRef.current.add(target.sub_category);
+        persistDeletedQueues();
+      }
+      setCategoryConfigs((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        categoryConfigsRef.current = next;
+        return next;
+      });
+      scheduleAutoPush();
+    },
+    [persistDeletedQueues, scheduleAutoPush]
+  );
 
   const updateSettings = useCallback((patch: Partial<AppSettings>) => {
-    setSettings((prev) => ({ ...prev, ...patch }));
+    setSettings((prev) => {
+      const next = { ...prev, ...patch };
+      settingsRef.current = next;
+      return next;
+    });
   }, []);
 
   const importSettingsCode = useCallback((codeOrUrl: string): boolean => {
@@ -975,6 +1206,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
               ? { supabaseAnonKey: String(synced.supabaseAnonKey).trim() }
               : {}),
           };
+          settingsRef.current = updated;
           try {
             localStorage.setItem(
               STORAGE_KEYS.SETTINGS,
@@ -983,7 +1215,8 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           } catch {}
           return updated;
         });
-        setLastSyncMessage('🎉 成功匯入金鑰設定！Google Maps 與 Gemini 已就緒。');
+        setLastSyncError(null);
+        setLastSyncMessage('🎉 成功匯入金鑰設定！Google Maps、Gemini 與 Supabase 已就緒。');
         return true;
       }
     } catch (e) {
@@ -1011,12 +1244,17 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         for (const rp of data.places || []) {
           refreshedMap.set(rp.id, rp);
         }
-        setPlaces((prev) =>
-          prev.map((p) => refreshedMap.get(p.id) || p)
-        );
+        setPlaces((prev) => {
+          const next = prev.map((p) => refreshedMap.get(p.id) || p);
+          placesRef.current = next;
+          return next;
+        });
         setLastSyncMessage(
           `已更新 ${refreshedMap.size} 間店家的最新 Google 營業狀態與時間`
         );
+        if (refreshedMap.size > 0) {
+          scheduleAutoPush();
+        }
         return refreshedMap.size;
       } catch (e) {
         console.warn('Refresh hours error:', e);
@@ -1025,79 +1263,415 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         setIsSyncing(false);
       }
     },
-    [settings.googleMapsApiKey]
+    [settings.googleMapsApiKey, scheduleAutoPush]
   );
 
+  /**
+   * Full Bidirectional Supabase Sync (Phone PWA ↔ PC):
+   * 1. Push pending local deletions (saved_places & category_configs)
+   * 2. Pull cloud saved_places & category_configs
+   * 3. Merge by latest updated_at (and detect remote deletions via lastSyncedPlaceIds)
+   * 4. On a fresh PWA's first sync, never push unmodified 33 default demo places back to cloud
+   * 5. Batch upsert newly added or locally newer places & categories
+   */
   const syncWithSupabase = useCallback(async (): Promise<{
     ok: boolean;
     message: string;
   }> => {
+    const curSettings = settingsRef.current;
+    const supabaseUrl = curSettings.supabaseUrl?.trim() || '';
+    const supabaseAnonKey = curSettings.supabaseAnonKey?.trim() || '';
+
     if (
-      !settings.supabaseUrl ||
-      !settings.supabaseAnonKey ||
-      settings.supabaseUrl.includes('your-project-id')
+      !supabaseUrl ||
+      !supabaseAnonKey ||
+      supabaseUrl.includes('your-project-id')
     ) {
-      return {
-        ok: false,
-        message: '請先填入有效的 Supabase URL 與 Anon Key',
-      };
+      const msg = '請先填入有效的 Supabase URL 與 Anon Key';
+      setLastSyncError(msg);
+      setLastSyncMessage(msg);
+      return { ok: false, message: msg };
     }
 
+    if (isSyncingRef.current) {
+      return { ok: true, message: '雲端同步進行中，請稍候...' };
+    }
+
+    isSyncingRef.current = true;
     setIsSyncing(true);
+
     try {
-      const supabase = createClient(
-        settings.supabaseUrl,
-        settings.supabaseAnonKey
-      );
-      for (const p of places) {
-        await supabase.rpc('upsert_saved_place', {
-          p_google_place_id: p.google_place_id,
-          p_name: p.name,
-          p_formatted_address: p.formatted_address,
-          p_country: p.country,
-          p_city: p.city,
-          p_district: p.district,
-          p_lat: p.latitude,
-          p_lng: p.longitude,
-          p_primary_category: p.primary_category,
-          p_sub_category: p.sub_category,
-          p_visit_status: p.visit_status,
-          p_estimated_stay_mins: p.estimated_stay_mins,
-          p_rating: p.rating,
-          p_opening_hours_json: p.opening_hours_json,
-          p_google_maps_url: p.google_maps_url,
-          p_user_notes: p.user_notes,
-          p_custom_tags: p.custom_tags,
-        });
+      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+      // Step 1: Push pending deletions first
+      const pendingDeletedPlaceIds = Array.from(deletedPlaceIdsRef.current);
+      let pushedDeletedCount = 0;
+      if (pendingDeletedPlaceIds.length > 0) {
+        const DEL_BATCH = 50;
+        for (let i = 0; i < pendingDeletedPlaceIds.length; i += DEL_BATCH) {
+          const slice = pendingDeletedPlaceIds.slice(i, i + DEL_BATCH);
+          const { error: delErr } = await supabase
+            .from('saved_places')
+            .delete()
+            .in('google_place_id', slice);
+          if (delErr) {
+            throw new Error(`推送刪除景點失敗：${delErr.message}`);
+          }
+          pushedDeletedCount += slice.length;
+        }
+        for (const id of pendingDeletedPlaceIds) {
+          deletedPlaceIdsRef.current.delete(id);
+        }
+        persistDeletedQueues();
       }
-      const msg = `成功將 ${places.length} 筆景點同步至 Supabase PostGIS 雲端資料庫！`;
+
+      const pendingDeletedCatSubs = Array.from(deletedCategorySubsRef.current);
+      if (pendingDeletedCatSubs.length > 0) {
+        const { error: delCatErr } = await supabase
+          .from('category_configs')
+          .delete()
+          .in('sub_category', pendingDeletedCatSubs);
+        if (delCatErr) {
+          throw new Error(`推送刪除分類失敗：${delCatErr.message}`);
+        }
+        for (const sub of pendingDeletedCatSubs) {
+          deletedCategorySubsRef.current.delete(sub);
+        }
+        persistDeletedQueues();
+      }
+
+      // Step 2: Pull cloud saved_places & category_configs
+      const { data: remotePlaceRows, error: pullPlacesErr } = await supabase
+        .from('saved_places')
+        .select(
+          'id, google_place_id, name, formatted_address, country, city, district, latitude, longitude, primary_category, sub_category, visit_status, business_status, estimated_stay_mins, rating, opening_hours_json, google_maps_url, user_notes, custom_tags, last_visited_at, hours_updated_at, created_at, updated_at'
+        )
+        .limit(5000);
+
+      if (pullPlacesErr) {
+        throw new Error(`拉取雲端景點失敗：${pullPlacesErr.message}`);
+      }
+
+      const { data: remoteCatRows, error: pullCatsErr } = await supabase
+        .from('category_configs')
+        .select(
+          'id, primary_category, primary_label, sub_category, sub_label, default_stay_mins, icon_name, sort_order, updated_at'
+        )
+        .order('sort_order', { ascending: true });
+
+      if (pullCatsErr) {
+        throw new Error(`拉取雲端分類失敗：${pullCatsErr.message}`);
+      }
+
+      const remotePlaces: SavedPlace[] = (remotePlaceRows || []).map((row) =>
+        supabaseRowToPlace(row as Record<string, unknown>)
+      );
+      const remoteCategories: CategoryConfig[] = (remoteCatRows || []).map(
+        (row) => ({
+          id: String(row.id),
+          primary_category: String(row.primary_category),
+          primary_label: String(row.primary_label),
+          sub_category: String(row.sub_category),
+          sub_label: String(row.sub_label),
+          default_stay_mins: Number(row.default_stay_mins) || 60,
+          icon_name: String(row.icon_name || 'MapPin'),
+          sort_order: Number(row.sort_order) || 100,
+          updated_at: row.updated_at ? String(row.updated_at) : undefined,
+        })
+      );
+
+      // Read prior sync metadata
+      let hasSyncedOnce = false;
+      let lastSyncedAtMs = 0;
+      let lastSyncedPlaceIds = new Set<string>();
+      try {
+        hasSyncedOnce =
+          localStorage.getItem(STORAGE_KEYS.HAS_SYNCED_ONCE) === '1';
+        lastSyncedAtMs = parseTimestampMs(
+          localStorage.getItem(STORAGE_KEYS.LAST_SYNCED_AT)
+        );
+        const rawIds = localStorage.getItem(STORAGE_KEYS.LAST_SYNCED_PLACE_IDS);
+        if (rawIds) {
+          const parsedIds = JSON.parse(rawIds);
+          if (Array.isArray(parsedIds)) {
+            lastSyncedPlaceIds = new Set(parsedIds.map(String));
+          }
+        }
+      } catch {}
+
+      // Step 3: Merge saved_places by latest updated_at
+      const localPlaces = placesRef.current;
+      const remoteByKey = new Map<string, SavedPlace>();
+      for (const rp of remotePlaces) {
+        remoteByKey.set(toCanonicalGooglePlaceId(rp), rp);
+      }
+
+      const localByKey = new Map<string, SavedPlace>();
+      for (const lp of localPlaces) {
+        localByKey.set(toCanonicalGooglePlaceId(lp), lp);
+      }
+
+      const mergedPlacesMap = new Map<string, SavedPlace>();
+      const placesToPushMap = new Map<string, SavedPlace>();
+      let pulledCount = 0;
+      let removedByRemoteDelete = 0;
+
+      // 3a. Reconcile all remote places
+      for (const [key, remote] of remoteByKey.entries()) {
+        if (deletedPlaceIdsRef.current.has(key)) continue;
+        const local = localByKey.get(key);
+        if (!local) {
+          mergedPlacesMap.set(key, remote);
+          pulledCount += 1;
+        } else if (!hasSyncedOnce && isUnmodifiedDefaultPlace(local)) {
+          // On fresh PWA first sync, cloud always wins over fresh demo timestamps
+          mergedPlacesMap.set(key, remote);
+        } else {
+          const localTs = parseTimestampMs(local.updated_at);
+          const remoteTs = parseTimestampMs(remote.updated_at);
+          if (localTs > remoteTs + 1000) {
+            mergedPlacesMap.set(key, local);
+            placesToPushMap.set(key, local);
+          } else {
+            mergedPlacesMap.set(key, remote);
+            if (remoteTs > localTs + 1000) {
+              pulledCount += 1;
+            }
+          }
+        }
+      }
+
+      // 3b. Reconcile local-only places
+      for (const [key, local] of localByKey.entries()) {
+        if (remoteByKey.has(key)) continue;
+
+        // Fresh PWA first sync: never push unmodified 33 default demo places back to cloud!
+        if (!hasSyncedOnce && isUnmodifiedDefaultPlace(local)) {
+          // If cloud is empty, keep demo places locally for usability without pushing;
+          // If cloud already has data, adopt cloud dataset cleanly
+          if (remotePlaces.length === 0) {
+            mergedPlacesMap.set(key, local);
+          }
+          continue;
+        }
+
+        // If previously synced to cloud, now absent in cloud, and not modified locally since last sync -> deleted on another device
+        const localTs = parseTimestampMs(local.updated_at);
+        if (
+          hasSyncedOnce &&
+          lastSyncedPlaceIds.has(key) &&
+          lastSyncedAtMs > 0 &&
+          localTs <= lastSyncedAtMs + 1000
+        ) {
+          removedByRemoteDelete += 1;
+          continue;
+        }
+
+        mergedPlacesMap.set(key, local);
+        placesToPushMap.set(key, local);
+      }
+
+      // Step 4: Batch upsert new/updated places to Supabase
+      const placesToPush = Array.from(placesToPushMap.values());
+      const UPSERT_BATCH = 50;
+      for (let i = 0; i < placesToPush.length; i += UPSERT_BATCH) {
+        const batchRows = placesToPush
+          .slice(i, i + UPSERT_BATCH)
+          .map(placeToSupabaseRow);
+        const { error: upsertErr } = await supabase
+          .from('saved_places')
+          .upsert(batchRows, { onConflict: 'google_place_id' });
+        if (upsertErr) {
+          throw new Error(`批次寫入景點失敗：${upsertErr.message}`);
+        }
+      }
+
+      // Step 5: Merge & batch upsert category_configs
+      const localCategories = categoryConfigsRef.current;
+      const remoteCatBySub = new Map<string, CategoryConfig>();
+      for (const rc of remoteCategories) {
+        remoteCatBySub.set(rc.sub_category, rc);
+      }
+      const localCatBySub = new Map<string, CategoryConfig>();
+      for (const lc of localCategories) {
+        localCatBySub.set(lc.sub_category, lc);
+      }
+
+      const mergedCatsMap = new Map<string, CategoryConfig>();
+      const catsToPush: CategoryConfig[] = [];
+
+      for (const [sub, rc] of remoteCatBySub.entries()) {
+        if (deletedCategorySubsRef.current.has(sub)) continue;
+        const lc = localCatBySub.get(sub);
+        if (!lc) {
+          mergedCatsMap.set(sub, rc);
+        } else if (!hasSyncedOnce && isUnmodifiedDefaultCategory(lc)) {
+          mergedCatsMap.set(sub, rc);
+        } else {
+          const localTs = parseTimestampMs(lc.updated_at);
+          const remoteTs = parseTimestampMs(rc.updated_at);
+          if (localTs > remoteTs + 1000) {
+            mergedCatsMap.set(sub, lc);
+            catsToPush.push(lc);
+          } else {
+            mergedCatsMap.set(sub, rc);
+          }
+        }
+      }
+
+      for (const [sub, lc] of localCatBySub.entries()) {
+        if (remoteCatBySub.has(sub)) continue;
+        mergedCatsMap.set(sub, lc);
+        if (
+          !(!hasSyncedOnce && remoteCategories.length > 0 && isUnmodifiedDefaultCategory(lc))
+        ) {
+          catsToPush.push(lc);
+        }
+      }
+
+      if (catsToPush.length > 0) {
+        const nowIso = new Date().toISOString();
+        const catRows = catsToPush.map((c) => ({
+          id: c.id,
+          primary_category: c.primary_category,
+          primary_label: c.primary_label,
+          sub_category: c.sub_category,
+          sub_label: c.sub_label,
+          default_stay_mins: Math.max(5, Math.round(Number(c.default_stay_mins) || 60)),
+          icon_name: c.icon_name || 'MapPin',
+          sort_order: Number(c.sort_order) || 100,
+          updated_at: c.updated_at || nowIso,
+        }));
+        const { error: upsertCatErr } = await supabase
+          .from('category_configs')
+          .upsert(catRows, { onConflict: 'sub_category' });
+        if (upsertCatErr) {
+          throw new Error(`同步分類設定失敗：${upsertCatErr.message}`);
+        }
+      }
+
+      const mergedPlaces = Array.from(mergedPlacesMap.values()).sort(
+        (a, b) =>
+          parseTimestampMs(b.updated_at) - parseTimestampMs(a.updated_at)
+      );
+      const mergedCategories = Array.from(mergedCatsMap.values()).sort(
+        (a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99)
+      );
+
+      placesRef.current = mergedPlaces;
+      setPlaces(mergedPlaces);
+      if (mergedCategories.length > 0) {
+        categoryConfigsRef.current = mergedCategories;
+        setCategoryConfigs(mergedCategories);
+      }
+
+      const syncedNowIso = new Date().toISOString();
+      lastSyncCompletedAtRef.current = Date.now();
+      setLastSyncedAt(syncedNowIso);
+      setLastSyncError(null);
+
+      // Persist sync metadata
+      const cloudSyncedKeys = new Set<string>([
+        ...Array.from(remoteByKey.keys()),
+        ...placesToPush.map(toCanonicalGooglePlaceId),
+      ]);
+      try {
+        localStorage.setItem(STORAGE_KEYS.HAS_SYNCED_ONCE, '1');
+        localStorage.setItem(STORAGE_KEYS.LAST_SYNCED_AT, syncedNowIso);
+        localStorage.setItem(
+          STORAGE_KEYS.LAST_SYNCED_PLACE_IDS,
+          JSON.stringify(Array.from(cloudSyncedKeys))
+        );
+      } catch {}
+
+      const summaryParts: string[] = [];
+      if (placesToPush.length > 0) summaryParts.push(`上傳 ${placesToPush.length} 筆`);
+      if (pulledCount > 0) summaryParts.push(`拉回 ${pulledCount} 筆`);
+      if (pushedDeletedCount > 0) summaryParts.push(`刪除 ${pushedDeletedCount} 筆`);
+      if (removedByRemoteDelete > 0) {
+        summaryParts.push(`同步移除 ${removedByRemoteDelete} 筆`);
+      }
+
+      const detail =
+        summaryParts.length > 0 ? summaryParts.join('、') : '已是最新狀態';
+      const msg = `✅ 雙向同步完成（${detail}，共 ${mergedPlaces.length} 筆景點）`;
       setLastSyncMessage(msg);
       return { ok: true, message: msg };
     } catch (err) {
-      const msg =
-        err instanceof Error
-          ? `Supabase 同步失敗: ${err.message}`
-          : 'Supabase 連線失敗，資料已安全保存於瀏覽器本機';
+      const rawErr =
+        err instanceof Error ? err.message : '無法連線至 Supabase 雲端資料庫';
+      const msg = `⚠️ Supabase 雙向同步失敗：${rawErr}`;
+      console.error('Supabase bidirectional sync failed:', err);
+      setLastSyncError(msg);
       setLastSyncMessage(msg);
       return { ok: false, message: msg };
     } finally {
+      isSyncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [places, settings.supabaseAnonKey, settings.supabaseUrl]);
+  }, [persistDeletedQueues]);
+
+  useEffect(() => {
+    syncWithSupabaseRef.current = syncWithSupabase;
+  }, [syncWithSupabase]);
+
+  // Auto-sync on page load when Supabase is configured
+  useEffect(() => {
+    if (!isHydrated || !isSupabaseConfigured || initialSyncTriggeredRef.current) {
+      return;
+    }
+    initialSyncTriggeredRef.current = true;
+    void syncWithSupabase();
+  }, [isHydrated, isSupabaseConfigured, syncWithSupabase]);
+
+  // Auto-sync when PWA returns to foreground (throttled to 15 seconds)
+  useEffect(() => {
+    if (!isHydrated || !isSupabaseConfigured) return;
+
+    const triggerForegroundSync = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      if (isSyncingRef.current) return;
+      const elapsedMs = Date.now() - lastSyncCompletedAtRef.current;
+      if (elapsedMs < 15_000) return;
+      void syncWithSupabase();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        triggerForegroundSync();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', triggerForegroundSync);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', triggerForegroundSync);
+    };
+  }, [isHydrated, isSupabaseConfigured, syncWithSupabase]);
 
   const resetToDemoData = useCallback(() => {
     setPlaces(INITIAL_SAVED_PLACES);
+    placesRef.current = INITIAL_SAVED_PLACES;
     setCategoryConfigs(DEFAULT_CATEGORY_CONFIGS);
+    categoryConfigsRef.current = DEFAULT_CATEGORY_CONFIGS;
     setRecentUpserts([]);
-    localStorage.setItem(
-      STORAGE_KEYS.PLACES,
-      JSON.stringify(INITIAL_SAVED_PLACES)
-    );
-    localStorage.setItem(
-      STORAGE_KEYS.CATEGORIES,
-      JSON.stringify(DEFAULT_CATEGORY_CONFIGS)
-    );
-  }, []);
+    deletedPlaceIdsRef.current.clear();
+    deletedCategorySubsRef.current.clear();
+    persistDeletedQueues();
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.PLACES,
+        JSON.stringify(INITIAL_SAVED_PLACES)
+      );
+      localStorage.setItem(
+        STORAGE_KEYS.CATEGORIES,
+        JSON.stringify(DEFAULT_CATEGORY_CONFIGS)
+      );
+    } catch {}
+  }, [persistDeletedQueues]);
 
   const auditAndFixAllPlaces = useCallback(
     async (
@@ -1136,6 +1710,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
                   url: p.google_maps_url || '',
                   title: p.name,
                   note: '',
+                  googlePlaceId: p.google_place_id || '',
                   rowCoords:
                     p.latitude && p.longitude
                       ? { lat: p.latitude, lng: p.longitude }
@@ -1319,15 +1894,18 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
               });
 
               if (updatesById.size > 0) {
-                setPlaces((prev) =>
-                  prev.map((p) => updatesById.get(p.id) || p)
-                );
+                setPlaces((prev) => {
+                  const next = prev.map((p) => updatesById.get(p.id) || p);
+                  placesRef.current = next;
+                  return next;
+                });
                 setRecentUpserts((prev) =>
                   prev.map((rec) => {
                     const updated = updatesById.get(rec.place.id);
                     return updated ? { ...rec, place: updated } : rec;
                   })
                 );
+                scheduleAutoPush();
               }
             }
           } catch (chunkErr) {
@@ -1364,23 +1942,9 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       categoryConfigs,
       settings.geminiApiKey,
       settings.googleMapsApiKey,
+      scheduleAutoPush,
     ]
   );
-
-  // One-time automatic full audit of all currently saved places after upgrading district/category/notes logic
-  useEffect(() => {
-    if (!isHydrated || autoAuditTriggeredRef.current || places.length === 0) {
-      return;
-    }
-    try {
-      const alreadyAudited = localStorage.getItem('antigravity_places_audit_v5');
-      if (alreadyAudited) return;
-    } catch {
-      return;
-    }
-    autoAuditTriggeredRef.current = true;
-    auditAndFixAllPlaces('ALL');
-  }, [isHydrated, places.length, auditAndFixAllPlaces]);
 
   const value = useMemo(
     () => ({
@@ -1390,12 +1954,17 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       recentUpserts,
       isHydrated,
       isSyncing,
+      isSupabaseConfigured,
       lastSyncMessage,
+      lastSyncError,
+      lastSyncedAt,
+      clearSyncFeedback,
       isAuditingPlaces,
       auditProgress,
       clearAuditProgress,
       auditAndFixAllPlaces,
       smartUpsertPlaces,
+      importPlacesFromJson,
       updatePlaceInline,
       deletePlace,
       clearRecentUpserts,
@@ -1415,12 +1984,17 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       recentUpserts,
       isHydrated,
       isSyncing,
+      isSupabaseConfigured,
       lastSyncMessage,
+      lastSyncError,
+      lastSyncedAt,
+      clearSyncFeedback,
       isAuditingPlaces,
       auditProgress,
       clearAuditProgress,
       auditAndFixAllPlaces,
       smartUpsertPlaces,
+      importPlacesFromJson,
       updatePlaceInline,
       deletePlace,
       clearRecentUpserts,

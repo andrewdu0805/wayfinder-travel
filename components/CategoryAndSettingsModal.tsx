@@ -1,26 +1,29 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   Check,
-  CloudUpload,
   Copy,
   Download,
   KeyRound,
   Layers,
   Plus,
   QrCode,
+  RefreshCw,
   RotateCcw,
   Smartphone,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
+import { CategoryConfig, SavedPlace } from '@/types/place';
 
 interface CategoryAndSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: 'categories' | 'api_cloud';
 }
 
 const PRIMARY_CATEGORY_OPTIONS = [
@@ -34,6 +37,7 @@ const PRIMARY_CATEGORY_OPTIONS = [
 export function CategoryAndSettingsModal({
   isOpen,
   onClose,
+  initialTab = 'categories',
 }: CategoryAndSettingsModalProps) {
   const {
     places,
@@ -41,23 +45,26 @@ export function CategoryAndSettingsModal({
     settings,
     isSyncing,
     lastSyncMessage,
+    lastSyncError,
     addCategoryConfig,
     updateCategoryConfig,
     deleteCategoryConfig,
     updateSettings,
     importSettingsCode,
+    importPlacesFromJson,
     syncWithSupabase,
     resetToDemoData,
   } = usePlaces();
 
   const [activeTab, setActiveTab] = useState<'categories' | 'api_cloud'>(
-    'categories'
+    initialTab
   );
   const [newPrimary, setNewPrimary] = useState('restaurant');
   const [newSubCode, setNewSubCode] = useState('');
   const [newSubLabel, setNewSubLabel] = useState('');
   const [newStayMins, setNewStayMins] = useState(60);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [syncFeedbackIsError, setSyncFeedbackIsError] = useState(false);
 
   // Cross-device sync state
   const [showQrModal, setShowQrModal] = useState(false);
@@ -65,6 +72,7 @@ export function CategoryAndSettingsModal({
   const [copied, setCopied] = useState(false);
   const [showImportBox, setShowImportBox] = useState(false);
   const [importCodeInput, setImportCodeInput] = useState('');
+  const jsonFileInputRef = useRef<HTMLInputElement | null>(null);
 
   if (!isOpen) return null;
 
@@ -103,6 +111,49 @@ export function CategoryAndSettingsModal({
       .slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleImportJsonBackup = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      let incomingPlaces: SavedPlace[] = [];
+      let incomingCategories: CategoryConfig[] | undefined;
+
+      if (Array.isArray(parsed)) {
+        incomingPlaces = parsed as SavedPlace[];
+      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.places)) {
+        incomingPlaces = parsed.places as SavedPlace[];
+        if (Array.isArray(parsed.categoryConfigs)) {
+          incomingCategories = parsed.categoryConfigs as CategoryConfig[];
+        }
+      }
+
+      const importedCount = importPlacesFromJson(
+        incomingPlaces,
+        incomingCategories
+      );
+      if (importedCount > 0) {
+        setSyncFeedbackIsError(false);
+        setSyncFeedback(
+          `✅ 成功匯入 ${importedCount} 筆 JSON 備份景點！（若已設定 Supabase 將於 1.5 秒後自動同步至雲端）`
+        );
+      } else {
+        setSyncFeedbackIsError(true);
+        setSyncFeedback(
+          '❌ JSON 檔案中找不到有效的景點資料，請選擇先前匯出的備份檔。'
+        );
+      }
+    } catch {
+      setSyncFeedbackIsError(true);
+      setSyncFeedback('❌ 無法解析 JSON 檔案，請確認檔案格式正確。');
+    }
   };
 
   const generateSyncUrl = () => {
@@ -530,9 +581,15 @@ export function CategoryAndSettingsModal({
                 </div>
               </div>
 
-              {(syncFeedback || lastSyncMessage) && (
-                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3.5 text-sm sm:text-base font-bold text-amber-900">
-                  {syncFeedback || lastSyncMessage}
+              {(syncFeedback || lastSyncError || lastSyncMessage) && (
+                <div
+                  className={`rounded-xl border p-3.5 text-sm sm:text-base font-bold ${
+                    (syncFeedback ? syncFeedbackIsError : Boolean(lastSyncError))
+                      ? 'bg-red-50 border-red-200 text-red-800'
+                      : 'bg-amber-50 border-amber-200 text-amber-900'
+                  }`}
+                >
+                  {syncFeedback || lastSyncError || lastSyncMessage}
                 </div>
               )}
 
@@ -540,16 +597,22 @@ export function CategoryAndSettingsModal({
               <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-stone-200">
                 <div className="flex flex-wrap items-center gap-3">
                   <button
+                    id="btn-modal-bidirectional-sync"
                     type="button"
                     disabled={isSyncing}
                     onClick={async () => {
                       const res = await syncWithSupabase();
+                      setSyncFeedbackIsError(!res.ok);
                       setSyncFeedback(res.message);
                     }}
                     className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-5 py-3 text-base sm:text-lg font-black text-white hover:bg-teal-800 disabled:opacity-50 cursor-pointer shadow-xs"
                   >
-                    <CloudUpload className="h-5 w-5" />
-                    一鍵同步至 Supabase 雲端
+                    <RefreshCw
+                      className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`}
+                    />
+                    {isSyncing
+                      ? '雙向同步中...'
+                      : '立即雙向同步（手機 ↔ 電腦）'}
                   </button>
 
                   <button
@@ -560,12 +623,30 @@ export function CategoryAndSettingsModal({
                     <Download className="h-5 w-5 text-amber-700" />
                     匯出完整 JSON 備份 ({places.length} 筆)
                   </button>
+
+                  <input
+                    ref={jsonFileInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleImportJsonBackup}
+                    className="hidden"
+                  />
+                  <button
+                    id="btn-import-json-backup"
+                    type="button"
+                    onClick={() => jsonFileInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-xl border-2 border-amber-300 bg-amber-50/70 px-4 py-3 text-base sm:text-lg font-black text-amber-950 hover:bg-amber-100 cursor-pointer shadow-xs"
+                  >
+                    <Upload className="h-5 w-5 text-amber-700" />
+                    匯入 JSON 備份
+                  </button>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => {
                     resetToDemoData();
+                    setSyncFeedbackIsError(false);
                     setSyncFeedback('已重置為內建台灣＋日本熱門城市預設資料！');
                   }}
                   className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 px-3.5 py-2.5 text-sm sm:text-base font-bold text-stone-500 hover:bg-stone-100 hover:text-stone-800 cursor-pointer"

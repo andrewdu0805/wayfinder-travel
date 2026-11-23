@@ -2,12 +2,14 @@
 
 import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   BookmarkCheck,
+  Cloud,
   Compass,
-  Database,
-  MapPin,
+  RefreshCw,
   Settings,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { usePlaces } from '@/context/PlacesContext';
 import { PlacesManagerView } from './PlacesManagerView';
@@ -19,16 +21,42 @@ interface AppShellProps {
 }
 
 export function AppShell({ initialTab = 'places' }: AppShellProps) {
-  const { places, settings, smartUpsertPlaces } = usePlaces();
+  const {
+    places,
+    settings,
+    isSyncing,
+    isSupabaseConfigured,
+    lastSyncError,
+    clearSyncFeedback,
+    syncWithSupabase,
+    smartUpsertPlaces,
+  } = usePlaces();
   const [activeTab, setActiveTab] = useState<'places' | 'planner'>(initialTab);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<
+    'categories' | 'api_cloud'
+  >('categories');
+  const [manualSyncToast, setManualSyncToast] = useState<string | null>(null);
 
-  const unvisitedCount = places.filter(
-    (p) => p.visit_status === 'unvisited'
-  ).length;
-  const revisitCount = places.filter(
-    (p) => p.visit_status === 'visited_revisit'
-  ).length;
+  const openSettings = (tab: 'categories' | 'api_cloud' = 'categories') => {
+    setSettingsInitialTab(tab);
+    setIsSettingsOpen(true);
+  };
+
+  const handleHeaderCloudSync = async () => {
+    if (!isSupabaseConfigured) {
+      openSettings('api_cloud');
+      return;
+    }
+    setManualSyncToast(null);
+    const res = await syncWithSupabase();
+    if (res.ok) {
+      setManualSyncToast(res.message);
+      setTimeout(() => {
+        setManualSyncToast((prev) => (prev === res.message ? null : prev));
+      }, 4500);
+    }
+  };
 
   // Handle PWA Web Share Target query params (?share_text=...&share_url=...)
   useEffect(() => {
@@ -82,15 +110,51 @@ export function AppShell({ initialTab = 'places' }: AppShellProps) {
               </div>
             </div>
 
-            <button
-              id="btn-header-settings"
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 sm:gap-1.5 rounded-xl border border-stone-300 bg-stone-50 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-base font-extrabold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
-            >
-              <Settings className="h-4 w-4 sm:h-5 sm:w-5 text-stone-600 shrink-0" />
-              <span className="whitespace-nowrap">分類設定</span>
-            </button>
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <button
+                id="btn-header-cloud-sync"
+                type="button"
+                disabled={isSyncing}
+                onClick={handleHeaderCloudSync}
+                title={
+                  isSupabaseConfigured
+                    ? '立即執行手機 ↔ 電腦 Supabase 雙向同步'
+                    : '前往設定 Supabase 雲端雙向同步'
+                }
+                className={`shrink-0 whitespace-nowrap inline-flex items-center gap-1 sm:gap-1.5 rounded-xl border px-2.5 py-1.5 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
+                  lastSyncError
+                    ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
+                    : isSupabaseConfigured
+                    ? 'border-teal-300 bg-teal-50 text-teal-800 hover:bg-teal-100'
+                    : 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                }`}
+              >
+                {isSyncing ? (
+                  <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
+                ) : isSupabaseConfigured ? (
+                  <RefreshCw className="h-4 w-4 shrink-0" />
+                ) : (
+                  <Cloud className="h-4 w-4 shrink-0" />
+                )}
+                <span className="whitespace-nowrap">
+                  {isSyncing
+                    ? '同步中...'
+                    : isSupabaseConfigured
+                    ? '雙向同步'
+                    : '雲端同步'}
+                </span>
+              </button>
+
+              <button
+                id="btn-header-settings"
+                type="button"
+                onClick={() => openSettings('categories')}
+                className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 sm:gap-1.5 rounded-xl border border-stone-300 bg-stone-50 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-base font-extrabold text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+              >
+                <Settings className="h-4 w-4 sm:h-5 sm:w-5 text-stone-600 shrink-0" />
+                <span className="whitespace-nowrap">分類設定</span>
+              </button>
+            </div>
           </div>
 
           {/* 兩大獨立功能區塊切換（精簡高度、防折行、好按大字） */}
@@ -126,11 +190,58 @@ export function AppShell({ initialTab = 'places' }: AppShellProps) {
         </div>
       </header>
 
+      {/* Supabase Sync Error Banner — Always visible when sync fails */}
+      {lastSyncError && (
+        <div className="border-b border-red-200 bg-red-50 px-4 py-2.5 text-red-900">
+          <div className="mx-auto max-w-6xl flex items-center justify-between gap-3 text-xs sm:text-sm font-bold">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+              <span className="break-words">{lastSyncError}</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                disabled={isSyncing}
+                onClick={handleHeaderCloudSync}
+                className="rounded-lg bg-red-600 px-2.5 py-1 text-xs font-extrabold text-white hover:bg-red-700 disabled:opacity-50 cursor-pointer whitespace-nowrap"
+              >
+                重試
+              </button>
+              <button
+                type="button"
+                onClick={clearSyncFeedback}
+                className="rounded-lg p-1 text-red-600 hover:bg-red-100 cursor-pointer"
+                title="關閉提示"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Brief Manual Sync Success Toast */}
+      {!lastSyncError && manualSyncToast && (
+        <div className="border-b border-teal-200 bg-teal-50 px-4 py-2 text-teal-900">
+          <div className="mx-auto max-w-6xl flex items-center justify-between gap-2 text-xs sm:text-sm font-bold">
+            <span>{manualSyncToast}</span>
+            <button
+              type="button"
+              onClick={() => setManualSyncToast(null)}
+              className="rounded-lg p-1 text-teal-700 hover:bg-teal-100 cursor-pointer shrink-0"
+              title="關閉提示"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Container */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6 py-5">
         {activeTab === 'places' ? (
           <PlacesManagerView
-            onOpenSettingsModal={() => setIsSettingsOpen(true)}
+            onOpenSettingsModal={() => openSettings('categories')}
           />
         ) : (
           <ItineraryPlannerView />
@@ -139,8 +250,10 @@ export function AppShell({ initialTab = 'places' }: AppShellProps) {
 
       {/* Settings & Flexible Category Modal */}
       <CategoryAndSettingsModal
+        key={`${isSettingsOpen ? 'open' : 'closed'}-${settingsInitialTab}`}
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        initialTab={settingsInitialTab}
       />
     </div>
   );

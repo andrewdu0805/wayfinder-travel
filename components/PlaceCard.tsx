@@ -48,6 +48,7 @@ export function PlaceCard({ place }: PlaceCardProps) {
               url: place.google_maps_url || '',
               title: place.name,
               note: '',
+              googlePlaceId: place.google_place_id || '',
               rowCoords:
                 place.latitude && place.longitude
                   ? { lat: place.latitude, lng: place.longitude }

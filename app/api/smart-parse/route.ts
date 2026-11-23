@@ -358,11 +358,17 @@ export async function POST(req: NextRequest) {
         url?: string;
         title?: string;
         note?: string;
+        googlePlaceId?: string;
         rowCoords?: { lat: number; lng: number } | null;
       }): Promise<SavedPlace> => {
         const itemUrl = String(item.url || '').trim();
         const itemTitle = String(item.title || '').trim();
         const itemNote = String(item.note || '').trim();
+        const existingGooglePlaceId = String(item.googlePlaceId || '').trim();
+        const hasRealExistingPlaceId =
+          existingGooglePlaceId.startsWith('ChIJ') &&
+          !existingGooglePlaceId.startsWith('ChIJ_') &&
+          existingGooglePlaceId.length >= 20;
         const hasUserCustomNote =
           Boolean(itemNote) &&
           itemNote !== '由 CSV 清單匯入' &&
@@ -380,6 +386,9 @@ export async function POST(req: NextRequest) {
             customTags: ['#GoogleMaps匯入'],
             rowCoords: item.rowCoords || null,
           });
+          if (hasRealExistingPlaceId) {
+            baseResolved.google_place_id = existingGooglePlaceId;
+          }
 
           // Enrich directly from Google Maps URL (og metadata + Places API + Gemini Maps Grounding)
           return enrichPlaceFromGoogleMapsUrl(baseResolved, {
@@ -401,7 +410,9 @@ export async function POST(req: NextRequest) {
           const region = extractRegionFromAddress(matchedTpl.formatted_address);
           return {
             id: `place-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            google_place_id: matchedTpl.google_place_id,
+            google_place_id: hasRealExistingPlaceId
+              ? existingGooglePlaceId
+              : matchedTpl.google_place_id,
             name: matchedTpl.name,
             formatted_address: matchedTpl.formatted_address,
             country: region.country,
@@ -452,6 +463,9 @@ export async function POST(req: NextRequest) {
           customTags: ['#GoogleMaps匯入'],
           rowCoords: null,
         });
+        if (hasRealExistingPlaceId) {
+          baseFallback.google_place_id = existingGooglePlaceId;
+        }
 
         return enrichPlaceFromGoogleMapsUrl(baseFallback, {
           googleMapsApiKey,
@@ -461,10 +475,13 @@ export async function POST(req: NextRequest) {
         });
       };
 
-      // Process in parallel chunks of 5 to keep CSV batch import fast & respectful of rate limits
+      // Process in parallel chunks of 2 with 250ms interval to avoid Google Places API HTTP 429 rate limits
       const parsedBatch: SavedPlace[] = [];
-      const CONCURRENCY = 5;
+      const CONCURRENCY = 2;
       for (let idx = 0; idx < body.batch.length; idx += CONCURRENCY) {
+        if (idx > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
         const chunk = body.batch.slice(idx, idx + CONCURRENCY);
         const chunkResults = await Promise.all(chunk.map(resolveOneRow));
         parsedBatch.push(...chunkResults);

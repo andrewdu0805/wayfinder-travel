@@ -16,6 +16,7 @@ export interface CategoryConfig {
   default_stay_mins: number;
   icon_name: string;
   sort_order: number;
+  updated_at?: string;
 }
 
 export interface OpeningHoursJson {
