@@ -50,6 +50,27 @@ const DEFAULT_CATEGORY_MAP = new Map<string, CategoryConfig>(
   DEFAULT_CATEGORY_CONFIGS.map((c) => [c.sub_category, c])
 );
 
+function normalizeSupabaseUrl(raw?: string | null): string {
+  const cleaned = (raw || '').replace(/[\u200B-\u200D\uFEFF\s]+/g, '');
+  if (!cleaned) return '';
+  const supabaseMatch = cleaned.match(/https?:\/\/[a-z0-9-]+\.supabase\.co/i);
+  if (supabaseMatch) {
+    return supabaseMatch[0].toLowerCase();
+  }
+  try {
+    const withProto = /^https?:\/\//i.test(cleaned)
+      ? cleaned
+      : `https://${cleaned}`;
+    return new URL(withProto).origin;
+  } catch {
+    return cleaned.replace(/\/+$/, '');
+  }
+}
+
+function cleanApiKey(raw?: string | null): string {
+  return (raw || '').replace(/[\u200B-\u200D\uFEFF\s]+/g, '');
+}
+
 function toCanonicalGooglePlaceId(p: SavedPlace): string {
   const raw = (p.google_place_id || '').trim();
   return raw || `local_${p.id}`;
@@ -1279,8 +1300,8 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
     message: string;
   }> => {
     const curSettings = settingsRef.current;
-    const supabaseUrl = curSettings.supabaseUrl?.trim() || '';
-    const supabaseAnonKey = curSettings.supabaseAnonKey?.trim() || '';
+    const supabaseUrl = normalizeSupabaseUrl(curSettings.supabaseUrl);
+    const supabaseAnonKey = cleanApiKey(curSettings.supabaseAnonKey);
 
     if (
       !supabaseUrl ||
@@ -1293,12 +1314,37 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, message: msg };
     }
 
+    // If the user's stored URL had extra paths/spaces/duplicates, auto-clean it in state
+    if (
+      supabaseUrl !== curSettings.supabaseUrl ||
+      supabaseAnonKey !== curSettings.supabaseAnonKey
+    ) {
+      setSettings((prev) => {
+        const cleaned = {
+          ...prev,
+          supabaseUrl,
+          supabaseAnonKey,
+        };
+        settingsRef.current = cleaned;
+        return cleaned;
+      });
+    }
+
     if (isSyncingRef.current) {
       return { ok: true, message: '雲端同步進行中，請稍候...' };
     }
 
     isSyncingRef.current = true;
     setIsSyncing(true);
+
+    const formatSbErr = (
+      step: string,
+      err: { message?: string; code?: string; details?: string; hint?: string }
+    ) => {
+      const codePart = err.code ? `[${err.code}] ` : '';
+      const hintPart = err.hint ? `（提示：${err.hint}）` : '';
+      return `${step}：${codePart}${err.message || '未知錯誤'}${hintPart}（連線網址：${supabaseUrl}）`;
+    };
 
     try {
       const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -1315,7 +1361,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
             .delete()
             .in('google_place_id', slice);
           if (delErr) {
-            throw new Error(`推送刪除景點失敗：${delErr.message}`);
+            throw new Error(formatSbErr('推送刪除景點失敗', delErr));
           }
           pushedDeletedCount += slice.length;
         }
@@ -1332,7 +1378,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           .delete()
           .in('sub_category', pendingDeletedCatSubs);
         if (delCatErr) {
-          throw new Error(`推送刪除分類失敗：${delCatErr.message}`);
+          throw new Error(formatSbErr('推送刪除分類失敗', delCatErr));
         }
         for (const sub of pendingDeletedCatSubs) {
           deletedCategorySubsRef.current.delete(sub);
@@ -1349,7 +1395,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         .limit(5000);
 
       if (pullPlacesErr) {
-        throw new Error(`拉取雲端景點失敗：${pullPlacesErr.message}`);
+        throw new Error(formatSbErr('拉取雲端景點失敗', pullPlacesErr));
       }
 
       const { data: remoteCatRows, error: pullCatsErr } = await supabase
@@ -1360,7 +1406,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         .order('sort_order', { ascending: true });
 
       if (pullCatsErr) {
-        throw new Error(`拉取雲端分類失敗：${pullCatsErr.message}`);
+        throw new Error(formatSbErr('拉取雲端分類失敗', pullCatsErr));
       }
 
       const remotePlaces: SavedPlace[] = (remotePlaceRows || []).map((row) =>
@@ -1482,7 +1528,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           .from('saved_places')
           .upsert(batchRows, { onConflict: 'google_place_id' });
         if (upsertErr) {
-          throw new Error(`批次寫入景點失敗：${upsertErr.message}`);
+          throw new Error(formatSbErr('批次寫入景點失敗', upsertErr));
         }
       }
 
@@ -1546,7 +1592,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           .from('category_configs')
           .upsert(catRows, { onConflict: 'sub_category' });
         if (upsertCatErr) {
-          throw new Error(`同步分類設定失敗：${upsertCatErr.message}`);
+          throw new Error(formatSbErr('同步分類設定失敗', upsertCatErr));
         }
       }
 
