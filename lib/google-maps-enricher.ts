@@ -11,6 +11,7 @@ import {
   extractPlaceNameFromGoogleMapsUrl,
   extractRegionFromAddress,
   inferPlaceCategoryByName,
+  separateNameAndAddress,
 } from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
 
@@ -583,6 +584,19 @@ export async function enrichPlaceFromGoogleMapsUrl(
       next.name = cleanStoreName(urlName);
     }
   }
+  // Always separate glued address + store name (e.g. "330桃園市桃園區莊敬里中正路1428號叁拾捌號咖啡店")
+  const sepName = separateNameAndAddress(next.name);
+  if (sepName.foundAddress) {
+    if (sepName.cleanName && sepName.cleanName.length >= 2) {
+      next.name = cleanStoreName(sepName.cleanName) || sepName.cleanName;
+    }
+    if (!/[路街段巷弄號大道]/.test(next.formatted_address || '')) {
+      next.formatted_address = sepName.foundAddress;
+    }
+    if (sepName.detectedCity) next.city = sepName.detectedCity;
+    if (sepName.detectedDistrict) next.district = sepName.detectedDistrict;
+    if (sepName.country) next.country = sepName.country;
+  }
   if (urlMeta.address && /[路街段巷弄號大道]/.test(urlMeta.address)) {
     next.formatted_address = urlMeta.address;
     const reg = extractRegionFromAddress(
@@ -658,6 +672,7 @@ export async function enrichPlaceFromGoogleMapsUrl(
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let top: any = null;
+      let matchedViaPlaceDetails = false;
       let stoppedByQuotaOrAuth = false;
       let lastFailedRes: Response | null = null;
 
@@ -684,6 +699,7 @@ export async function enrichPlaceFromGoogleMapsUrl(
           );
           if (detailRes.ok) {
             top = await detailRes.json();
+            matchedViaPlaceDetails = true;
             lastFailedRes = null;
             break;
           }
@@ -703,8 +719,12 @@ export async function enrichPlaceFromGoogleMapsUrl(
 
       // Step 2b: Fall back to Places Text Search only if Place Details didn't succeed AND we didn't hit 429/403/401
       if (!top && !stoppedByQuotaOrAuth) {
-        // Do NOT include potentially-wrong old district in textQuery; rely on city + exact URL locationBias!
-        const textQuery = `${next.name} ${next.city}`.trim();
+        const hasSpecificAddr = /[路街段巷弄號大道]/.test(
+          next.formatted_address || ''
+        );
+        const textQuery = hasSpecificAddr
+          ? `${next.name} ${next.formatted_address}`.trim()
+          : `${next.name} ${next.city}`.trim();
         const requestBody: Record<string, unknown> = {
           textQuery,
           languageCode: 'zh-TW',
@@ -718,7 +738,7 @@ export async function enrichPlaceFromGoogleMapsUrl(
           requestBody.locationBias = {
             circle: {
               center: { latitude: next.latitude, longitude: next.longitude },
-              radius: 2500.0,
+              radius: 5000.0,
             },
           };
         }
@@ -777,18 +797,25 @@ export async function enrichPlaceFromGoogleMapsUrl(
         console.warn('Google Places API failed:', lastFailedRes.status, rawErrMsg);
         (next as SavedPlace & { _syncDiagnostic?: string })._syncDiagnostic =
           diagMsg;
+      } else if (!top) {
+        (next as SavedPlace & { _syncDiagnostic?: string })._syncDiagnostic =
+          `⚠️ Google Places 查無對應店家（「${next.name}」），請檢查店名或點🗺️地圖確認`;
       }
 
       if (top) {
         {
-          // Only enforce strict 4km guard if URL actually had exact pin coordinates;
-          // otherwise allow up to 25km so rough district centroids never reject the real Google Maps venue!
+          // Never drift-reject an exact Place Details match; for text search, allow up to 25km if same city
           const hadExactUrlCoords = Boolean(
             extractCoordsFromGoogleMapsUrl(basePlace.google_maps_url || '')
           );
-          const maxAllowedDistM = hadExactUrlCoords ? 5000 : 25000;
+          const topAddr = String(top.formattedAddress || '').replace(/臺/g, '台');
+          const normNextCity = (next.city || '').replace(/臺/g, '台');
+          const isSameCity = Boolean(normNextCity && topAddr.includes(normNextCity));
+          const maxAllowedDistM =
+            hadExactUrlCoords && !isSameCity ? 5000 : 25000;
           let isDrifted = false;
           if (
+            !matchedViaPlaceDetails &&
             next.latitude &&
             next.longitude &&
             top.location?.latitude &&
@@ -803,6 +830,11 @@ export async function enrichPlaceFromGoogleMapsUrl(
             if (distM > maxAllowedDistM) {
               isDrifted = true;
             }
+          }
+
+          if (isDrifted) {
+            (next as SavedPlace & { _syncDiagnostic?: string })._syncDiagnostic =
+              `⚠️ Google 回傳地點距離過遠（${top.displayName?.text || ''}），已略過以避免誤改`;
           }
 
           if (!isDrifted) {
