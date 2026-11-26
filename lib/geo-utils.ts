@@ -1813,155 +1813,306 @@ export function getCoordinatesForRegion(
   };
 }
 
-export function inferPlaceCategoryByName(text: string): {
+export interface CategoryDiagnosis {
+  primary_category: string;
+  sub_category: string;
+  estimated_stay_mins: number;
+  isExplicitMatch: boolean;
+}
+
+export function inferPlaceCategoryByName(
+  text: string,
+  notes = '',
+  customTags: string[] = []
+): {
   primary_category: string;
   sub_category: string;
   estimated_stay_mins: number;
 } {
+  const { primary_category, sub_category, estimated_stay_mins } =
+    diagnosePlaceCategory(text, notes, customTags);
+  return { primary_category, sub_category, estimated_stay_mins };
+}
+
+export function diagnosePlaceCategory(
+  text: string,
+  notes = '',
+  customTags: string[] = []
+): CategoryDiagnosis {
   const lower = (text || '').toLowerCase().trim();
   if (!lower) {
     return {
       primary_category: 'restaurant',
       sub_category: 'meal',
       estimated_stay_mins: 80,
+      isExplicitMatch: false,
     };
   }
 
-  // 1. Souvenir / Local Specialty
+  // Strip parenthetical branch/location suffixes like "(駁二概念店)", "(迪化街老店)", "(孔廟總店)", "(高美館門市)"
+  // so branch locations don't hijack a shop's true category!
+  const coreName =
+    lower
+      .replace(
+        /\([^)]*(?:店|門市|總店|分店|老店|概念店|旗艦店|專櫃|本舖|本店)[^)]*\)|（[^）]*(?:店|門市|總店|分店|老店|概念店|旗艦店|專櫃|本舖|本店)[^）]*）/g,
+        ''
+      )
+      .trim() || lower;
+
+  const hasExplicitFoodShopWord =
+    /餅店|餅家|餅舖|糕餅|和菓子|洋菓子|伴手禮|名產|咖啡|甜點|豆花|布丁|奶茶|茶飲|冰店|冰品|牛肉湯|米糕|碗粿|鹹粥|麵店|餐廳|餐酒|酒吧/.test(
+      coreName
+    );
+
+  // 1. Souvenir / Local Specialty Shops (check on coreName & lower first!)
   if (
-    /伴手禮|名產|禮盒|餅店|糕餅|鳳梨酥|肉乾|茶葉|大餅|蛋黃酥|太陽餅|奶油酥餅|牛軋糖/.test(
-      lower
+    /伴手禮|名產|特產|禮盒|土產|餅店|餅家|餅舖|糕餅|煎餅|椪餅|鳳梨酥|蛋黃酥|太陽餅|奶油酥餅|牛軋糖|貢糖|肉乾|肉紙|肉鬆|蜜餞|果乾|烏魚子|茶葉行|地瓜酥|芋頭酥|方塊酥|牛舌餅|銅鑼燒|蜂蜜蛋糕|波士頓蛋糕|波士頓派|夏威夷豆塔|不二緻果|高雄不二家|巴堂|舊振南|連得堂|依蕾特|克林台包|名坂奇|正家興|江記華隆|錦記|微熱山丘|佳德|犁記|裕珍馨|奕順軒|福義軒|曾記麻糬|新東陽|快車肉乾|紅磚布丁|銀波布丁|kameju/.test(
+      coreName
     )
   ) {
     return {
       primary_category: 'restaurant',
       sub_category: 'souvenir',
       estimated_stay_mins: 20,
+      isExplicitMatch: true,
     };
   }
 
-  // 2. Bar / Craft Beer / Bistro / Nightlife / Wine Shop (Evaluate BEFORE dessert & nature so 自然酒 / 精釀 doesn't get misrouted!)
+  // 2. Museums, Art Galleries, Cultural Centers, Creative Parks & Tourist Factories
   if (
-    /餐酒|酒吧|bistro|\bbar\b|居酒屋|啤酒|精釀|小酌|調酒|\bpub\b|\bwine\b|\bbeer\b|酉|微醺|釀造|酒造|品酒|bottle|瓶子|選酒|自然酒|紅白酒|葡萄酒|洋酒|烈酒|清酒|威士忌|whisky|whiskey|cocktail|gin|sake|taproom|draft|酒館|酒莊/.test(
-      lower
-    )
-  ) {
-    return {
-      primary_category: 'restaurant',
-      sub_category: 'bar',
-      estimated_stay_mins: 90,
-    };
-  }
-
-  // 3. Desserts, Coffee, Bakeries, Ice Cream (Excluding 茶餐廳 which is a full meal!)
-  if (!lower.includes('茶餐廳')) {
-    if (
-      /咖啡|甜點|下午茶|布丁|豆花|蛋糕|烘焙|泡芙|鬆餅|奶茶|和菓子|刨冰|剉冰|雪花冰|冰淇淋|冰店|甘味|cafe|coffee|bakery|dessert|ice cream/.test(
-        lower
-      )
-    ) {
-      return {
-        primary_category: 'restaurant',
-        sub_category: 'snack_dessert',
-        estimated_stay_mins: 50,
-      };
-    }
-    // Match tea/ice beverage only if explicitly drinks/shaved ice (e.g. 紅茶, 綠茶, 冰品)
-    if (/(?:紅茶|綠茶|烏龍茶|手搖|水果茶|抹茶|冰品|吃冰)/.test(lower)) {
-      return {
-        primary_category: 'restaurant',
-        sub_category: 'snack_dessert',
-        estimated_stay_mins: 40,
-      };
-    }
-  }
-
-  // 4. Museums, Art Galleries, Cultural Halls, Tourist Factories & Exhibition Centers
-  if (
-    /文創館|觀光工廠|工場|體驗館|探索館|展示館|美學館|藝文館|生活館|藝文中心|文化中心|藝術中心|藝術文化中心|音樂中心|演藝廳|音樂廳|歌劇院|劇院|文化園區|文創園區|文創園|文創特區|藝術特區|美術館|博物館|展覽館|展覽|藝術館|歷史館|鐵道館|糖廠|展演|故事館|紀念館|文物館|文學館|文化館|工藝館|故宮|天文館|科博館|科工館|科學館|海洋館|海生館|水族館|圖書館|駁二|衛武營|museum|gallery|art center/.test(
-      lower
+    !hasExplicitFoodShopWord &&
+    /文創館|觀光工廠|幸福工廠|工場|體驗館|探索館|展示館|美學館|藝文館|生活藝術空間|御書房|生活館|藝文中心|文化中心|藝術中心|藝術文化中心|文化觀光中心|音樂中心|流行音樂中心|演藝廳|音樂廳|歌劇院|劇院|文化園區|文創園區|文創產業園區|文化創意產業園區|文創園|文創特區|藝術特區|美術館|博物館|展覽館|展覽|藝術館|歷史館|鐵道館|鐵道文化園區|糖廠|十鼓|展演|故事館|紀念館|文物館|文學館|文化館|工藝館|故宮|天文館|科博館|科工館|科學館|海洋館|海生館|水族館|圖書館|駁二|衛武營|華山1914|華山文創|松山文創|松菸|奇美博|南美館|高美館|北美館|國美館|museum|gallery|art\s*center/.test(
+      coreName
     )
   ) {
     return {
       primary_category: 'museum_culture',
       sub_category: 'museum',
       estimated_stay_mins: 110,
+      isExplicitMatch: true,
     };
   }
 
-  // 5. Historic Landmarks, Temples, Piers, Fishing Harbors, Industrial Heritage (CRITICAL: Do NOT match bare '堡' or '宮' which matches 漢堡 or 宮保!)
+  // 3. Amusement Parks & Theme Parks
   if (
-    /蚵仔寮|漁港|碼頭|港灣|漁村|古蹟|歷史建築|磚窯|窯廠|酒廠|書院|教堂|聖母|眷村|遺址|武德殿|出張所|領事館|洋行|別邸|逍遙園|忠烈祠|隧道|棧貳庫|大港橋|愛河灣|蓮池潭|龍虎塔|西子灣|紀念堂|宗祠|古厝|砲台|燈塔|城門|牌坊|神社|天后宮|城隍廟|關帝廟|文武廟|三清宮|佛寺|寺院|天主堂|大教堂|老街|古城|地標|遊客中心|安平古堡|億載金城|紅毛城|赤崁樓|孔廟/.test(
-      lower
+    /樂園|遊樂場|遊樂園|摩天輪|卡丁車|鈴鹿賽道|水上樂園|主題樂園|主題公園|動物園|\bzoo\b|義大遊樂|六福村|九族文化村|麗寶|劍湖山|小人國/.test(
+      coreName
     )
   ) {
-    return {
-      primary_category: 'museum_culture',
-      sub_category: 'landmark',
-      estimated_stay_mins: 60,
-    };
-  }
-
-  // 5.5. Shopping, Night Markets, Fish Markets, Malls & Bookstores
-  if (
-    /夜市|魚市場|觀光魚市|市集|商圈|購物中心|百貨|商場|老市場|菜市場|黃昏市場|公有市場|選物|書店|書局|誠品|outlet|\bmall\b/.test(
-      lower
-    )
-  ) {
-    return {
-      primary_category: 'shopping',
-      sub_category: 'other',
-      estimated_stay_mins: 60,
-    };
-  }
-
-  // 6. Amusement Parks & Theme Parks
-  if (/樂園|遊樂場|摩天輪|卡丁車|水上樂園|主題樂園|主題公園/.test(lower)) {
     return {
       primary_category: 'theme_park_leisure',
       sub_category: 'amusement_park',
       estimated_stay_mins: 240,
+      isExplicitMatch: true,
     };
   }
 
-  // 7. Nature Outdoors, Hiking Trails, Scenic Areas, Farms & Ranches (CRITICAL: Do NOT match bare '山' which matches 鼓山, 鳳山, 岡山, 中山路!)
+  // 4. Nature Outdoors, Hiking Trails, Scenic Viewpoints, Wetlands & Beaches
   if (
-    /登山步道|登山|步道|健行|步徑|林道|古道|森林公園|國家公園|都會公園|河濱公園|濱海公園|植物園|濕地|生態園區|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|沙灘|海水浴場|海岸風景|觀景台|瞭望台|神木|露營區|農場|牧場|休閒農業/.test(
-      lower
+    !hasExplicitFoodShopWord &&
+    /登山步道|登山|步道|健行|步徑|林道|古道|綠色隧道|四草|森林公園|國家公園|台江|都會公園|河濱公園|濱海公園|親水公園|生態公園|植物園|濕地|生態園區|風景區|自然保留區|森林遊樂區|大峽谷|瀑布|海灘|沙灘|海水浴場|黃金海岸|漁光島|海岸風景|觀景台|壽山觀景|瞭望台|神木|露營區|農場|牧場|休閒農業/.test(
+      coreName
     )
   ) {
     return {
       primary_category: 'nature_outdoor',
       sub_category: 'trail',
       estimated_stay_mins: 90,
+      isExplicitMatch: true,
     };
   }
 
-  // 8. Taiwanese Local Street Food / Savory Snacks (在地小吃)
-  if (isTaiwaneseStreetFood(text)) {
+  // 5. Historic Landmarks, Old Streets, Temples, Piers, Harbors & Heritage Sites
+  if (
+    !hasExplicitFoodShopWord &&
+    /蚵仔寮|漁港|碼頭|港灣|漁村|古蹟|歷史建築|磚窯|窯廠|酒廠|書院|教堂|聖母|眷村|水交社|審計新村|遺址|武德殿|出張所|領事館|洋行|別邸|逍遙園|安平樹屋|樹屋|雄鎮北門|北門嶼|東門城|南門城|西門紅樓|紅樓|忠烈祠|星空隧道|隧道|棧貳庫|kw2|大港橋|愛河灣|河樂廣場|神農街|迪化街|大稻埕|蝸牛巷|西市場|大菜市|西門市場|蓮池潭|龍虎塔|西子灣|紀念堂|紀念碑|宗祠|古厝|砲台|燈塔|城門|牌坊|神社|神宮|淺草寺|雷門|天后宮|媽祖廟|城隍廟|關帝廟|祀典武廟|武廟|大天后宮|文武廟|三清宮|保安宮|龍山寺|行天宮|霞海|佛寺|寺院|天主堂|大教堂|老街|古城|地標|遊客中心|安平古堡|億載金城|紅毛城|赤崁樓|赤嵌樓|孔廟/.test(
+      coreName
+    )
+  ) {
+    return {
+      primary_category: 'museum_culture',
+      sub_category: 'landmark',
+      estimated_stay_mins: 60,
+      isExplicitMatch: true,
+    };
+  }
+
+  // 6. Shopping, Night Markets, Fish Markets, Department Stores & Bookstores
+  if (
+    !hasExplicitFoodShopWord &&
+    /夜市|魚市場|觀光魚市|市集|商圈|購物中心|百貨|林百貨|商場|老市場|菜市場|黃昏市場|公有市場|選物|書店|書局|誠品|outlet|\bmall\b|新光三越|大遠百|漢神|夢時代|唐吉訶德/.test(
+      coreName
+    )
+  ) {
+    return {
+      primary_category: 'shopping',
+      sub_category: 'other',
+      estimated_stay_mins: 60,
+      isExplicitMatch: true,
+    };
+  }
+
+  // 7. Bar / Craft Beer / Bistro / Cocktail Lounge / Wine Shop
+  if (
+    /餐酒|酒吧|bistro|\bbar\b|居酒屋|啤酒|精釀|小酌|調酒|\bpub\b|\bwine\b|\bbeer\b|酉|微醺|釀造|酒造|品酒|bottle|瓶子|選酒|自然酒|紅白酒|葡萄酒|洋酒|烈酒|清酒|威士忌|whisky|whiskey|cocktail|gin\b|sake|taproom|draft|酒館|酒莊|夜店|lounge|speakeasy|酣呷|the\s*han[\s-]*jia|赫玖|tcrc|moonrock|phowa|榕\s*ron/.test(
+      coreName
+    )
+  ) {
+    return {
+      primary_category: 'restaurant',
+      sub_category: 'bar',
+      estimated_stay_mins: 90,
+      isExplicitMatch: true,
+    };
+  }
+
+  // 8. Desserts, Coffee, Shaved Ice, Sweet Soup, Tea Houses & Beverages (Excluding 茶餐廳!)
+  if (!coreName.includes('茶餐廳')) {
+    if (
+      /咖啡|甜點|甜品|甜湯|下午茶|布丁|豆花|蛋糕|千層|巴斯克|可麗露|肉桂捲|司康|烘焙|麵包店|生吐司|泡芙|鬆餅|舒芙蕾|可麗餅|甜甜圈|雞蛋糕|車輪餅|紅豆餅|白糖粿|麻糬冰|圓仔冰|八寶冰|婆婆冰|刨冰|剉冰|挫冰|雪花冰|冰淇淋|霜淇淋|冰店|冰品|冰室|冰菓室|冰果室|吃冰|燒仙草|仙草凍|嫩仙草|愛玉冰|紅豆湯|綠豆湯|薏仁湯|杏仁茶|杏仁豆腐|粉圓|奶茶|鮮奶茶|紅茶|綠茶|烏龍茶|青茶|冬瓜茶|手搖|水果茶|果汁|木瓜牛奶|檸檬汁|楊枝甘露|抹茶|茶飲|茶室|茶館|茶屋|茶坊|茶空間|甘味|和菓子|洋菓子|銀座聚場|takao\s*ginza|新濱・駅前|新濱駅前|春田茶室|sabisabi|蜷尾家|深藍咖啡|宮原眼科|第四信用合作社|cafe|coffee|roaster|espresso|bakery|patisserie|dessert|pudding|gelato|ice\s*cream|boba/.test(
+        coreName
+      )
+    ) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'snack_dessert',
+        estimated_stay_mins: 45,
+        isExplicitMatch: true,
+      };
+    }
+  }
+
+  // 9. Taiwanese Local Street Food / Savory Snacks (在地小吃)
+  if (isTaiwaneseStreetFood(coreName, '', customTags)) {
     return {
       primary_category: 'restaurant',
       sub_category: 'street_food',
       estimated_stay_mins: 40,
+      isExplicitMatch: true,
     };
   }
 
-  // 9. General Dining / Sit-down Meals (Default fallback for restaurants, hotpot, steak, Western/French/Japanese cuisine, etc.)
+  // 9.5. Explicit Sit-down Restaurant Match
+  if (SIT_DOWN_RESTAURANT_NAME_REGEX.test(coreName)) {
+    return {
+      primary_category: 'restaurant',
+      sub_category: 'meal',
+      estimated_stay_mins: 80,
+      isExplicitMatch: true,
+    };
+  }
+
+  // 10. Secondary Disambiguation via Notes / Tags (for creative/abstract brand names)
+  const auxText = `${notes || ''} ${(customTags || []).join(' ')}`.trim();
+  if (auxText) {
+    if (/參觀者表示這座|文化創意產業園區|當代藝術特展|常設展出/.test(auxText)) {
+      return {
+        primary_category: 'museum_culture',
+        sub_category: 'museum',
+        estimated_stay_mins: 110,
+        isExplicitMatch: true,
+      };
+    }
+    if (/遊客表示這座.*(?:主題樂園|遊樂園|卡丁車)/.test(auxText)) {
+      return {
+        primary_category: 'theme_park_leisure',
+        sub_category: 'amusement_park',
+        estimated_stay_mins: 240,
+        isExplicitMatch: true,
+      };
+    }
+    if (
+      /遊客表示這座.*(?:古蹟|歷史建築|砲台|書院|教堂|古堡|磚窯|碼頭|漁港|地標)/.test(
+        auxText
+      )
+    ) {
+      return {
+        primary_category: 'museum_culture',
+        sub_category: 'landmark',
+        estimated_stay_mins: 60,
+        isExplicitMatch: true,
+      };
+    }
+    if (/遊客表示這處戶外景點|景觀步道/.test(auxText)) {
+      return {
+        primary_category: 'nature_outdoor',
+        sub_category: 'trail',
+        estimated_stay_mins: 90,
+        isExplicitMatch: true,
+      };
+    }
+    if (/遊客表示這處在地市集商圈/.test(auxText)) {
+      return {
+        primary_category: 'shopping',
+        sub_category: 'other',
+        estimated_stay_mins: 60,
+        isExplicitMatch: true,
+      };
+    }
+    if (/伴手禮名店|人氣排隊伴手禮|必買伴手禮|#伴手禮|#名產/.test(auxText)) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'souvenir',
+        estimated_stay_mins: 20,
+        isExplicitMatch: true,
+      };
+    }
+    if (
+      /創意調酒餐酒館|調酒吧|葡萄酒吧|精釀啤酒|這家酒吧|這家餐酒館|微醺放鬆/.test(
+        auxText
+      )
+    ) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'bar',
+        estimated_stay_mins: 90,
+        isExplicitMatch: true,
+      };
+    }
+    if (
+      /老屋咖啡|精品咖啡|手沖咖啡|冰滴咖啡|手工布丁|手工豆花|傳統甜品|八寶冰|白糖粿|茶空間/.test(
+        auxText
+      ) &&
+      !/漢堡|義大利麵|披薩|火鍋|牛排|熱炒|燒肉/.test(auxText)
+    ) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'snack_dessert',
+        estimated_stay_mins: 45,
+        isExplicitMatch: true,
+      };
+    }
+    if (
+      /古早味小吃店|傳統麵攤|無名麵店|老麵攤|排隊早餐老店|#在地小吃|#排隊小吃|#銅板小吃/.test(
+        auxText
+      )
+    ) {
+      return {
+        primary_category: 'restaurant',
+        sub_category: 'street_food',
+        estimated_stay_mins: 40,
+        isExplicitMatch: true,
+      };
+    }
+  }
+
+  // 11. General Dining / Sit-down Meals (Default fallback)
   return {
     primary_category: 'restaurant',
     sub_category: 'meal',
     estimated_stay_mins: 80,
+    isExplicitMatch: false,
   };
 }
 
 const NON_FOOD_LANDMARK_OR_MARKET_REGEX =
-  /漁港|魚市|老街|夜市|市場|市集|碼頭|公園|古堡|樹屋|文創|藝術|博物館|美術館|紀念館|故事館|百貨|商場|購物中心|書院|教堂|天后宮|廟|寺|神社|步道|觀景/i;
+  /漁港|魚市|老街|夜市|市場|市集|碼頭|公園|古堡|樹屋|北門|城門|紅樓|文創|藝術|博物館|美術館|紀念館|故事館|百貨|商場|購物中心|書院|教堂|天后宮|廟|寺|神社|步道|觀景|神農街|迪化街|大稻埕|蝸牛巷|華山1914|棧貳庫|逍遙園/i;
 
 const SIT_DOWN_RESTAURANT_NAME_REGEX =
-  /鼎泰豐|餐廳|大飯店|飯店|酒店|會館|餐館|食堂|小館|料理|私廚|無菜單|吃到飽|百匯|buffet|火鍋|麻辣鍋|涮涮鍋|石頭鍋|壽喜燒|燒肉|烤肉|牛排|排餐|鐵板燒|義大利麵|義式|法式|美式|泰式|越式|印式|韓式|港式|茶餐廳|港點|飲茶|拉麵|烏龍麵|蕎麥麵|居酒屋|壽司|生魚片|刺身|丼飯|咖哩|早午餐|brunch|披薩|pizza|漢堡|burger|熱炒|海產店|梅鑫海產|海鮮餐廳|甕仔雞|桶仔雞|土雞城|燻羊肉|合菜|桌菜|素食餐廳|蔬食餐廳|bistro|mon\s*poulet/i;
+  /鼎泰豐|餐廳|大飯店|飯店|酒店|會館|餐館|食堂|小館|料理|私廚|無菜單|吃到飽|百匯|buffet|火鍋|麻辣鍋|涮涮鍋|石頭鍋|壽喜燒|燒肉|烤肉|牛排|排餐|鐵板燒|義大利麵|義式|法式|美式|泰式|越式|印式|韓式|港式|茶餐廳|港點|飲茶|拉麵|烏龍麵|蕎麥麵|居酒屋|壽司|生魚片|刺身|丼飯|咖哩|早午餐|brunch|披薩|pizza|slice|漢堡|burger|熱炒|海產店|梅鑫海產|海鮮餐廳|甕仔雞|桶仔雞|土雞城|燻羊肉|合菜|桌菜|素食餐廳|蔬食餐廳|bistro|mon\s*poulet/i;
 
 const SWEET_CAFE_OR_BAR_NAME_REGEX =
-  /咖啡|甜點|下午茶|布丁|豆花|蛋糕|烘焙|泡芙|鬆餅|奶茶|紅茶|綠茶|烏龍|手搖|茶飲|果汁|木瓜牛奶|刨冰|剉冰|雪花冰|冰淇淋|冰店|冰品|甜品|圓仔冰|甜湯|雞蛋糕|車輪餅|紅豆餅|甜甜圈|可麗餅|白糖粿|和菓子|洋菓子|伴手禮|名產|餅店|餅家|糕餅|煎餅|地瓜酥|餐酒|酒吧|\bbar\b|精釀|調酒|茶室|茶館/i;
+  /咖啡|甜點|甜品|甜湯|下午茶|布丁|豆花|蛋糕|烘焙|泡芙|鬆餅|奶茶|紅茶|綠茶|烏龍|手搖|茶飲|果汁|木瓜牛奶|刨冰|剉冰|挫冰|雪花冰|冰淇淋|霜淇淋|冰店|冰品|冰室|冰菓室|圓仔冰|八寶冰|婆婆冰|雞蛋糕|車輪餅|紅豆餅|甜甜圈|可麗餅|白糖粿|和菓子|洋菓子|伴手禮|名產|餅店|餅家|糕餅|煎餅|椪餅|地瓜酥|銅鑼燒|不二緻果|巴堂|舊振南|連得堂|依蕾特|克林台包|名坂奇|正家興|江記華隆|錦記|餐酒|酒吧|\bbar\b|精釀|調酒|酣呷|赫玖|茶室|茶館|茶屋|茶坊|銀座聚場|新濱・駅前|新濱駅前|sabisabi/i;
 
 const TAIWAN_STREET_FOOD_NAME_REGEX =
   /小吃|老攤|攤販|路邊攤|麵攤|麵店|無名麵|堀江麵|九重葛|興隆居|阜杭豆漿|富盛號|醇涎坊|集品蝦仁飯|矮仔成|六千泓佐|六千牛肉|阿堂鹹粥|阿松割包|鴨肉珍|鴨肉本|下林米糕|牛肉湯|羊肉湯|魚湯|鮮魚湯|虱目魚|土魠魚|𩵚魠魚|小卷米粉|鹹粥|海產粥|廣東粥|肉粥|香菇肉羹|肉羹|肉焿|鴨肉羹|鴨肉焿|魷魚羹|魷魚焿|浮水魚羹|花枝羹|生炒花枝|鱔魚|豬心冬粉|豬心|當歸鴨|下水湯|四神湯|排骨酥|滷肉飯|魯肉飯|肉燥飯|火雞肉飯|雞肉飯|鴨肉飯|蝦仁飯|豬腳飯|控肉飯|爌肉飯|筒仔米糕|米糕|碗粿|肉粿|米粿|菜粽|肉粽|燒肉粽|油飯|飯糰|刈包|割包|潤餅|春捲|擔仔麵|意麵|鍋燒|陽春麵|切仔麵|乾麵|麻醬麵|涼麵|傻瓜乾麵|牛肉麵|牛肉拌麵|米苔目|米粉湯|炒米粉|米粉炒|粄條|粿條|鼎邊趖|餛飩|扁食|水餃|鍋貼|煎餃|小籠湯包|小籠包|湯包|生煎包|水煎包|蒸餃|肉包|包子|饅頭|燒餅|油條|永和豆漿|豆漿店|蛋餅|蔥油餅|蔥抓餅|韭菜盒|餡餅|胡椒餅|肉圓|肉丸|臭豆腐|蚵仔(?!寮)|蝦仁煎|蚵爹|炸粿|甜不辣|黑輪|關東煮|大腸包小腸|大腸麵線|麵線糊|麵線|香腸熟肉|黑白切|魯味|滷味|鹽酥雞|鹹酥雞|雞排|地瓜球|章魚燒|烤玉米|豬血糕|米血/i;

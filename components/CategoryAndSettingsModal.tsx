@@ -52,7 +52,7 @@ export function CategoryAndSettingsModal({
     updateSettings,
     importSettingsCode,
     importPlacesFromJson,
-    reclassifyStreetFoodFromMeals,
+    verifyAllPlacesCategories,
     syncWithSupabase,
     resetToDemoData,
   } = usePlaces();
@@ -278,21 +278,21 @@ export function CategoryAndSettingsModal({
 
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-200/80">
                   <span className="text-xs sm:text-sm font-bold text-amber-900">
-                    🥢 可免消耗 API 額度，直接將現有「正餐」中的牛肉湯、米糕、碗粿、麵攤等自動分流至「在地小吃」：
+                    ✨ 免消耗 Google API 額度，一鍵全面檢查並修正所有地點分類（正餐、在地小吃、點心、伴手禮、酒吧、展館、古蹟、步道、市集）：
                   </span>
                   <button
                     type="button"
                     onClick={() => {
-                      const moved = reclassifyStreetFoodFromMeals();
+                      const res = verifyAllPlacesCategories('ALL');
                       setStreetFoodFeedback(
-                        moved > 0
-                          ? `✅ 已將 ${moved} 間店家從「正餐」歸類為「在地小吃」（並自動同步雲端）！`
-                          : '✅ 目前「正餐」中已無待分流的在地小吃店家'
+                        res.fixedCount > 0
+                          ? `✅ 已檢查 ${res.totalChecked} 筆地點，自動修正 ${res.fixedCount} 筆分類並同步雲端：${res.fixedDetails.slice(0, 8).join('；')}${res.fixedDetails.length > 8 ? '...' : ''}`
+                          : `✅ 已檢查全部 ${res.totalChecked} 筆地點，目前所有分類皆正確無誤！`
                       );
                     }}
                     className="rounded-xl bg-teal-600 px-3.5 py-2 text-xs sm:text-sm font-extrabold text-white hover:bg-teal-700 transition-colors cursor-pointer whitespace-nowrap"
                   >
-                    🥢 重新掃描分出「在地小吃」
+                    ✨ 全面確認所有地點分類
                   </button>
                 </div>
                 {streetFoodFeedback && (

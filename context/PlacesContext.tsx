@@ -22,6 +22,7 @@ import {
 import {
   ALL_TAIWAN_CITY_DISTRICTS,
   cleanStoreName,
+  diagnosePlaceCategory,
   extractCoordsFromGoogleMapsUrl,
   extractRegionFromAddress,
   getCoordinatesForRegion,
@@ -43,6 +44,7 @@ const STORAGE_KEYS = {
   HAS_SYNCED_ONCE: 'antigravity_has_synced_once_v1',
   HAS_LOCAL_MUTATION: 'antigravity_has_local_mutation_v1',
   STREET_FOOD_MIGRATED: 'antigravity_street_food_migrated_v1',
+  ALL_CATEGORIES_VERIFIED: 'antigravity_all_categories_verified_v2',
 };
 
 const DEFAULT_PLACE_MAP = new Map<string, SavedPlace>(
@@ -52,6 +54,63 @@ const DEFAULT_PLACE_MAP = new Map<string, SavedPlace>(
 const DEFAULT_CATEGORY_MAP = new Map<string, CategoryConfig>(
   DEFAULT_CATEGORY_CONFIGS.map((c) => [c.sub_category, c])
 );
+
+function verifyPlaceCategorySingle(
+  p: SavedPlace,
+  activeCats: CategoryConfig[],
+  deletedCatSubs: Set<string>,
+  nowIso: string
+): { updated: SavedPlace; oldLabel: string; newLabel: string } | null {
+  if (!DEFAULT_CATEGORY_MAP.has(p.sub_category)) return null;
+
+  const diag = diagnosePlaceCategory(p.name, p.user_notes, p.custom_tags);
+  if (!diag.isExplicitMatch) return null;
+  if (deletedCatSubs.has(diag.sub_category)) return null;
+  if (
+    diag.sub_category === p.sub_category &&
+    diag.primary_category === p.primary_category
+  ) {
+    return null;
+  }
+
+  const targetCfg = activeCats.find((c) => c.sub_category === diag.sub_category);
+  const oldLabel =
+    activeCats.find((c) => c.sub_category === p.sub_category)?.sub_label ||
+    DEFAULT_CATEGORY_MAP.get(p.sub_category)?.sub_label ||
+    p.sub_category;
+  const newLabel =
+    targetCfg?.sub_label ||
+    DEFAULT_CATEGORY_MAP.get(diag.sub_category)?.sub_label ||
+    diag.sub_category;
+  const nextStay = targetCfg?.default_stay_mins ?? diag.estimated_stay_mins;
+
+  let nextNotes = p.user_notes || '';
+  if (
+    diag.primary_category !== 'restaurant' &&
+    /這家餐廳|餐點美味|招牌主食|老饕喜愛/.test(nextNotes)
+  ) {
+    nextNotes = resolvePlaceDescription(
+      p.name,
+      p.city,
+      p.district,
+      diag.sub_category,
+      p.formatted_address
+    );
+  }
+
+  return {
+    updated: {
+      ...p,
+      primary_category: diag.primary_category,
+      sub_category: diag.sub_category,
+      estimated_stay_mins: nextStay,
+      user_notes: nextNotes,
+      updated_at: nowIso,
+    },
+    oldLabel,
+    newLabel,
+  };
+}
 
 function normalizeSupabaseUrl(raw?: string | null): string {
   const cleaned = (raw || '').replace(/[\u200B-\u200D\uFEFF\s]+/g, '');
@@ -258,6 +317,9 @@ interface PlacesContextValue {
   importSettingsCode: (codeOrUrl: string) => boolean;
   refreshPlacesHours: (targetPlaces: SavedPlace[]) => Promise<number>;
   reclassifyStreetFoodFromMeals: () => number;
+  verifyAllPlacesCategories: (
+    targetCity?: string
+  ) => { totalChecked: number; fixedCount: number; fixedDetails: string[] };
   syncWithSupabase: () => Promise<{ ok: boolean; message: string }>;
   resetToDemoData: () => void;
 }
@@ -768,29 +830,40 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           const hasSb =
             Boolean(normalizeSupabaseUrl(hydratedSbUrl)) &&
             Boolean(cleanApiKey(hydratedSbKey));
-          // If Supabase is NOT configured, run one-time local street_food split here;
+          // If Supabase is NOT configured, run one-time full category verification here;
           // If Supabase IS configured, syncWithSupabase runs it right after pulling remote so cloud gets updated too!
           if (
             !hasSb &&
-            localStorage.getItem(STORAGE_KEYS.STREET_FOOD_MIGRATED) !== '1'
+            localStorage.getItem(STORAGE_KEYS.ALL_CATEGORIES_VERIFIED) !== '1'
           ) {
-            const streetStay =
-              hydratedCats.find((c) => c.sub_category === 'street_food')
-                ?.default_stay_mins ?? 40;
             const migIso = new Date().toISOString();
-            sanitized = sanitized.map((p) =>
-              p.primary_category === 'restaurant' &&
-              p.sub_category === 'meal' &&
-              isTaiwaneseStreetFood(p.name, '', p.custom_tags)
-                ? {
-                    ...p,
-                    sub_category: 'street_food',
-                    estimated_stay_mins: streetStay,
-                    updated_at: migIso,
-                  }
-                : p
-            );
+            const fixedDetails: string[] = [];
+            sanitized = sanitized.map((p) => {
+              const res = verifyPlaceCategorySingle(
+                p,
+                hydratedCats,
+                deletedCategorySubsRef.current,
+                migIso
+              );
+              if (res) {
+                fixedDetails.push(
+                  `${p.name}（${res.oldLabel} → ${res.newLabel}）`
+                );
+                return res.updated;
+              }
+              return p;
+            });
+            if (fixedDetails.length > 0) {
+              setAuditProgress({
+                current: sanitized.length,
+                total: sanitized.length,
+                fixedCount: fixedDetails.length,
+                fixedDetails,
+                done: true,
+              });
+            }
             localStorage.setItem(STORAGE_KEYS.STREET_FOOD_MIGRATED, '1');
+            localStorage.setItem(STORAGE_KEYS.ALL_CATEGORIES_VERIFIED, '1');
           }
           setPlaces(sanitized);
           placesRef.current = sanitized;
@@ -1566,50 +1639,50 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         placesToPushMap.set(key, local);
       }
 
-      // 3c. One-time auto-split of Taiwanese street food (在地小吃) from generic 'meal' (正餐)
-      let streetFoodMigratedAlready = false;
+      // 3c. One-time comprehensive verification of ALL place categories across the entire list
+      let allCatsVerifiedAlready = false;
       try {
-        streetFoodMigratedAlready =
-          localStorage.getItem(STORAGE_KEYS.STREET_FOOD_MIGRATED) === '1';
+        allCatsVerifiedAlready =
+          localStorage.getItem(STORAGE_KEYS.ALL_CATEGORIES_VERIFIED) === '1';
       } catch {}
-      if (!streetFoodMigratedAlready) {
-        const cloudAlreadyHasStreetFood = remotePlaces.some(
-          (rp) =>
-            rp.sub_category === 'street_food' && !isUnmodifiedDefaultPlace(rp)
-        );
-        if (!cloudAlreadyHasStreetFood) {
-          const streetFoodStay =
-            categoryConfigsRef.current.find(
-              (c) => c.sub_category === 'street_food'
-            )?.default_stay_mins ?? 40;
-          const migrationIso = new Date().toISOString();
-          for (const [key, mp] of Array.from(mergedPlacesMap.entries())) {
+      if (!allCatsVerifiedAlready) {
+        const migrationIso = new Date().toISOString();
+        const fixedDetails: string[] = [];
+        for (const [key, mp] of Array.from(mergedPlacesMap.entries())) {
+          const res = verifyPlaceCategorySingle(
+            mp,
+            categoryConfigsRef.current,
+            deletedCategorySubsRef.current,
+            migrationIso
+          );
+          if (res) {
+            mergedPlacesMap.set(key, res.updated);
+            fixedDetails.push(
+              `${mp.name}（${res.oldLabel} → ${res.newLabel}）`
+            );
             if (
-              mp.primary_category === 'restaurant' &&
-              mp.sub_category === 'meal' &&
-              isTaiwaneseStreetFood(mp.name, '', mp.custom_tags)
+              !(
+                !hasSyncedOnce &&
+                remotePlaces.length === 0 &&
+                isUnmodifiedDefaultPlace(mp)
+              )
             ) {
-              const reclassified: SavedPlace = {
-                ...mp,
-                sub_category: 'street_food',
-                estimated_stay_mins: streetFoodStay,
-                updated_at: migrationIso,
-              };
-              mergedPlacesMap.set(key, reclassified);
-              if (
-                !(
-                  !hasSyncedOnce &&
-                  remotePlaces.length === 0 &&
-                  isUnmodifiedDefaultPlace(mp)
-                )
-              ) {
-                placesToPushMap.set(key, reclassified);
-              }
+              placesToPushMap.set(key, res.updated);
             }
           }
         }
+        if (fixedDetails.length > 0) {
+          setAuditProgress({
+            current: mergedPlacesMap.size,
+            total: mergedPlacesMap.size,
+            fixedCount: fixedDetails.length,
+            fixedDetails,
+            done: true,
+          });
+        }
         try {
           localStorage.setItem(STORAGE_KEYS.STREET_FOOD_MIGRATED, '1');
+          localStorage.setItem(STORAGE_KEYS.ALL_CATEGORIES_VERIFIED, '1');
         } catch {}
       }
 
@@ -2154,6 +2227,78 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
     return count;
   }, [persistDeletedQueues, scheduleAutoPush]);
 
+  const verifyAllPlacesCategories = useCallback(
+    (
+      targetCity?: string
+    ): { totalChecked: number; fixedCount: number; fixedDetails: string[] } => {
+      const nowIso = new Date().toISOString();
+      // Ensure all non-deleted default categories exist in categoryConfigs
+      const existingSubs = new Set(
+        categoryConfigsRef.current.map((c) => c.sub_category)
+      );
+      const missingDefaults = DEFAULT_CATEGORY_CONFIGS.filter(
+        (def) =>
+          !existingSubs.has(def.sub_category) &&
+          !deletedCategorySubsRef.current.has(def.sub_category)
+      );
+      let activeCats = categoryConfigsRef.current;
+      if (missingDefaults.length > 0) {
+        activeCats = [
+          ...categoryConfigsRef.current,
+          ...missingDefaults.map((d) => ({ ...d, updated_at: nowIso })),
+        ].sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
+        categoryConfigsRef.current = activeCats;
+        setCategoryConfigs(activeCats);
+      }
+
+      let totalChecked = 0;
+      const fixedDetails: string[] = [];
+      const nextPlaces = placesRef.current.map((p) => {
+        if (targetCity && targetCity !== 'ALL' && p.city !== targetCity) {
+          return p;
+        }
+        totalChecked += 1;
+        const res = verifyPlaceCategorySingle(
+          p,
+          activeCats,
+          deletedCategorySubsRef.current,
+          nowIso
+        );
+        if (res) {
+          fixedDetails.push(`${p.name}（${res.oldLabel} → ${res.newLabel}）`);
+          return res.updated;
+        }
+        return p;
+      });
+
+      try {
+        localStorage.setItem(STORAGE_KEYS.STREET_FOOD_MIGRATED, '1');
+        localStorage.setItem(STORAGE_KEYS.ALL_CATEGORIES_VERIFIED, '1');
+      } catch {}
+
+      if (fixedDetails.length > 0 || missingDefaults.length > 0) {
+        placesRef.current = nextPlaces;
+        setPlaces(nextPlaces);
+        scheduleAutoPush();
+      }
+
+      setAuditProgress({
+        current: totalChecked,
+        total: totalChecked,
+        fixedCount: fixedDetails.length,
+        fixedDetails,
+        done: true,
+      });
+
+      return {
+        totalChecked,
+        fixedCount: fixedDetails.length,
+        fixedDetails,
+      };
+    },
+    [scheduleAutoPush]
+  );
+
   const value = useMemo(
     () => ({
       places,
@@ -2183,6 +2328,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       importSettingsCode,
       refreshPlacesHours,
       reclassifyStreetFoodFromMeals,
+      verifyAllPlacesCategories,
       syncWithSupabase,
       resetToDemoData,
     }),
@@ -2214,6 +2360,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       importSettingsCode,
       refreshPlacesHours,
       reclassifyStreetFoodFromMeals,
+      verifyAllPlacesCategories,
       syncWithSupabase,
       resetToDemoData,
     ]

@@ -28,7 +28,7 @@ export function PlacesManagerView({
     isAuditingPlaces,
     auditProgress,
     clearAuditProgress,
-    auditAndFixAllPlaces,
+    verifyAllPlacesCategories,
   } = usePlaces();
 
   const [selectedCity, setSelectedCity] = useState<string>('ALL');
@@ -357,8 +357,8 @@ export function PlacesManagerView({
               id="btn-audit-all-places"
               type="button"
               disabled={isAuditingPlaces || placesInSelectedCity.length === 0}
-              onClick={() => auditAndFixAllPlaces(selectedCity)}
-              title="依 Google Maps 網址重新檢查並修正地區、分類、營業時間與備註"
+              onClick={() => verifyAllPlacesCategories(selectedCity)}
+              title="免消耗 Google API 額度，立即重新確認全部地點的分類（正餐／在地小吃／點心／伴手禮／酒吧／展館／古蹟／步道／市集）並同步雲端"
               className="inline-flex items-center gap-1 rounded-xl border border-teal-300 bg-teal-50 px-2.5 py-1.5 text-xs font-extrabold text-teal-900 hover:bg-teal-100 disabled:opacity-50 cursor-pointer whitespace-nowrap shrink-0 transition-colors"
             >
               {isAuditingPlaces ? (
@@ -366,13 +366,13 @@ export function PlacesManagerView({
               ) : (
                 <Sparkles className="h-3.5 w-3.5 text-teal-700" />
               )}
-              <span>{isAuditingPlaces ? '檢查中...' : '全面校驗'}</span>
+              <span>{isAuditingPlaces ? '確認中...' : '確認分類'}</span>
             </button>
           </div>
         </div>
       </section>
 
-      {/* 全面校驗進度與修正回報橫幅 */}
+      {/* 全面確認分類進度與修正回報橫幅 */}
       {auditProgress && (
         <div
           className={`rounded-2xl border px-4 py-3 text-sm shadow-xs transition-all ${
@@ -391,14 +391,16 @@ export function PlacesManagerView({
               <div className="space-y-1 min-w-0">
                 <p className="font-extrabold">
                   {auditProgress.done
-                    ? `已完成全部 ${auditProgress.total} 筆地點校驗，共自動修正 ${auditProgress.fixedCount} 筆（地區、分類、備註或營業時間）`
-                    : `正在依 Google Maps 網址全面檢查地點（地區、分類、備註）：${auditProgress.current} / ${auditProgress.total}（已修正 ${auditProgress.fixedCount} 筆）...`}
+                    ? auditProgress.fixedCount > 0
+                      ? `✅ 已全面確認 ${auditProgress.total} 筆地點分類，共自動修正 ${auditProgress.fixedCount} 筆（已同步至雲端）`
+                      : `✅ 已全面確認全部 ${auditProgress.total} 筆地點，目前所有分類皆正確無誤！`
+                    : `正在檢查地點分類：${auditProgress.current} / ${auditProgress.total}（已修正 ${auditProgress.fixedCount} 筆）...`}
                 </p>
                 {auditProgress.fixedDetails.length > 0 && (
-                  <p className="text-xs font-medium opacity-85 leading-relaxed">
-                    已修正項目：{auditProgress.fixedDetails.slice(0, 8).join('；')}
-                    {auditProgress.fixedDetails.length > 8
-                      ? ` 等共 ${auditProgress.fixedDetails.length} 筆`
+                  <p className="text-xs font-medium opacity-90 leading-relaxed">
+                    已修正項目：{auditProgress.fixedDetails.slice(0, 15).join('；')}
+                    {auditProgress.fixedDetails.length > 15
+                      ? ` ...等共 ${auditProgress.fixedDetails.length} 筆`
                       : ''}
                   </p>
                 )}
