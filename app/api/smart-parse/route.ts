@@ -4,6 +4,7 @@ import {
   extractCoordsFromGoogleMapsUrl,
   extractRegionFromAddress,
   getCoordinatesForRegion,
+  isTaiwaneseStreetFood,
   separateNameAndAddress,
 } from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
@@ -41,12 +42,12 @@ const BUILTIN_GAZETTEER: KnownPlaceTemplate[] = [
     latitude: 22.6251,
     longitude: 120.2836,
     primary_category: 'restaurant',
-    sub_category: 'meal',
-    estimated_stay_mins: 50,
+    sub_category: 'street_food',
+    estimated_stay_mins: 40,
     rating: 4.4,
     daily_hours: { open: '05:30', close: '13:30' },
     default_notes: '鹽埕公有市場人氣鮮魚肚漿湯與魚皮湯',
-    tags: ['#傳統早午餐', '#鹽埕市場'],
+    tags: ['#傳統早餐', '#鹽埕市場', '#在地小吃'],
   },
   {
     keywords: ['銀座聚場', 'Takao Ginza'],
@@ -71,12 +72,12 @@ const BUILTIN_GAZETTEER: KnownPlaceTemplate[] = [
     latitude: 22.6218,
     longitude: 120.2869,
     primary_category: 'restaurant',
-    sub_category: 'meal',
-    estimated_stay_mins: 60,
+    sub_category: 'street_food',
+    estimated_stay_mins: 45,
     rating: 4.3,
     daily_hours: { open: '10:30', close: '20:00' },
     default_notes: '鹽埕六十年老店，必點牛肉拌麵與豬腳拌麵配蒜泥',
-    tags: ['#牛肉拌麵', '#老字號正餐'],
+    tags: ['#牛肉拌麵', '#在地小吃'],
   },
   {
     keywords: ['不二緻果', '高雄不二家', '真芋頭'],
@@ -101,12 +102,12 @@ const BUILTIN_GAZETTEER: KnownPlaceTemplate[] = [
     latitude: 22.6238,
     longitude: 120.2820,
     primary_category: 'restaurant',
-    sub_category: 'meal',
-    estimated_stay_mins: 60,
+    sub_category: 'street_food',
+    estimated_stay_mins: 40,
     rating: 4.4,
     daily_hours: { open: '10:00', close: '20:20' },
     default_notes: '米其林必比登推薦鴨肉飯與下水湯',
-    tags: ['#必比登', '#老店'],
+    tags: ['#必比登', '#老店', '#在地小吃'],
   },
   {
     keywords: ['內惟藝術中心'],
@@ -319,7 +320,17 @@ function inferCategoryHeuristic(
     };
   }
 
-  // 9. Dining / Meals
+  // 9. Taiwanese Local Street Food (在地小吃)
+  if (isTaiwaneseStreetFood(text)) {
+    return {
+      primary_category: 'restaurant',
+      sub_category: 'street_food',
+      estimated_stay_mins: findStay('street_food', 40),
+      visit_status,
+    };
+  }
+
+  // 10. General Dining / Sit-down Meals
   return {
     primary_category: 'restaurant',
     sub_category: 'meal',
@@ -782,7 +793,7 @@ export async function POST(req: NextRequest) {
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: `你是一位精準的旅遊資料分類器與地點擷取引擎。請從以下使用者貼上的內容（可能是單筆店名、Google Maps 連結、或整段 IG/部落格多店推薦文案）擷取出所有提到的具體店家或景點，並依規則分類：
-1. 若為餐飲類，primary_category 必為 "restaurant"，且細分 sub_category 為 "meal"（正餐）、"snack_dessert"（點心/咖啡/下午茶）、"souvenir"（伴手禮/名產）。
+1. 若為餐飲類，primary_category 必為 "restaurant"，且細分 sub_category 為 "meal"（一般正餐餐廳/火鍋/燒肉/牛排/合菜）、"street_food"（台灣在地小吃/牛肉湯/米糕/碗粿/鹹粥/麵攤/滷肉飯/臭豆腐等）、"snack_dessert"（甜點/冰品/咖啡/飲料/下午茶）、"bar"（酒吧/餐酒館/精釀啤酒）、"souvenir"（伴手禮/名產）。
 2. 若為博物館、美術館、文化園區或古蹟，primary_category 為 "museum_culture"，sub_category 為 "museum" 或 "landmark"。
 3. 若為主題樂園，primary_category 為 "theme_park_leisure"，sub_category 為 "amusement_park"。
 4. 若備註有明確提到「去過」，則 visit_status 為 "visited_revisit"，否則預設為 "unvisited"。

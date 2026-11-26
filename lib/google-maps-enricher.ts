@@ -11,6 +11,7 @@ import {
   extractPlaceNameFromGoogleMapsUrl,
   extractRegionFromAddress,
   inferPlaceCategoryByName,
+  isTaiwaneseStreetFood,
   separateNameAndAddress,
 } from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
@@ -301,6 +302,9 @@ export function mapGoogleCategoryToAppCategory(
     ) {
       primary = 'restaurant';
       sub = 'bar';
+    } else if (isTaiwaneseStreetFood(placeName, label)) {
+      primary = 'restaurant';
+      sub = 'street_food';
     } else {
       primary = 'restaurant';
       sub = 'meal';
@@ -363,13 +367,16 @@ export function mapGoogleCategoryToAppCategory(
       primary = 'restaurant';
       sub = 'snack_dessert';
     } else if (
-      /餐廳|飯店|料理|麵店|牛肉麵|火鍋|燒肉|牛排|早午餐|早餐店|熱炒|海鮮|食堂|小館|小吃|快餐|義大利|意大利|美式|日式|中式|泰式|韓式|法式|台菜|烤雞|燒臘/.test(
+      /餐廳|飯店|料理|麵店|牛肉麵|火鍋|燒肉|牛排|早午餐|早餐店|熱炒|海鮮|食堂|小館|小吃|熟食|粥品|餃子|滷味|攤販|快餐|義大利|意大利|美式|日式|中式|泰式|韓式|法式|台菜|烤雞|燒臘/.test(
         label
       )
     ) {
       if (/餐酒館|酒吧|精釀|bistro|\bbar\b|啤酒/.test(nameLower)) {
         primary = 'restaurant';
         sub = 'bar';
+      } else if (isTaiwaneseStreetFood(placeName, label)) {
+        primary = 'restaurant';
+        sub = 'street_food';
       } else {
         primary = 'restaurant';
         sub = 'meal';
@@ -405,7 +412,7 @@ export function mapGoogleCategoryToAppCategory(
       sub = 'landmark';
     } else if (allTypes.has('restaurant') || allTypes.has('food')) {
       primary = 'restaurant';
-      sub = 'meal';
+      sub = isTaiwaneseStreetFood(placeName, label) ? 'street_food' : 'meal';
     }
   }
 
@@ -425,6 +432,8 @@ export function mapGoogleCategoryToAppCategory(
         ? 75
         : sub === 'meal'
         ? 60
+        : sub === 'street_food'
+        ? 40
         : sub === 'souvenir'
         ? 25
         : 45),
@@ -1062,7 +1071,7 @@ export async function enrichPlaceFromGoogleMapsUrl(
 請嚴格回傳 JSON 物件（不要任何 Markdown 標記或額外說明），欄位如下：
 {
   "name": "Google Maps 顯示的簡潔官方名稱（移除行銷括號）",
-  "sub_category": "必須為 meal | snack_dessert | bar | souvenir | museum | landmark | trail 七選一（博物館/藝文中心選 museum，古蹟/廟宇/地標選 landmark，公園/步道選 trail，酒吧/餐酒館/精釀啤酒選 bar，咖啡/甜點/小吃選 snack_dessert，伴手禮選 souvenir，正餐餐廳選 meal）",
+  "sub_category": "必須為 meal | street_food | snack_dessert | bar | souvenir | museum | landmark | trail 八選一（博物館/藝文中心選 museum，古蹟/廟宇/地標選 landmark，公園/步道選 trail，酒吧/餐酒館/精釀啤酒選 bar，台灣在地鹹食小吃/牛肉湯/米糕/碗粿/麵攤選 street_food，咖啡/甜點/冰品/飲料選 snack_dessert，伴手禮選 souvenir，一般正餐餐廳選 meal）",
   "formatted_address": "完整台灣地址（含郵遞區號、縣市、行政區與門牌）",
   "weekday_description": "簡潔營業時間（例如：週二至週日 11:00–21:00，週一公休；或每日 17:30–01:00）",
   "open_time": "HH:MM（24小時制，如 11:00）",
@@ -1121,6 +1130,7 @@ export async function enrichPlaceFromGoogleMapsUrl(
           parsed.sub_category &&
           [
             'meal',
+            'street_food',
             'snack_dessert',
             'bar',
             'souvenir',

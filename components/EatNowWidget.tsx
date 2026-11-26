@@ -38,6 +38,7 @@ interface CravingOption {
 
 const EMOJI_BY_SUB_CATEGORY: Record<string, string> = {
   meal: '🍜',
+  street_food: '🥢',
   snack_dessert: '🍮',
   souvenir: '🎁',
   bar: '🍸',
@@ -52,7 +53,7 @@ const EMOJI_BY_ICON: Record<string, string> = {
   IceCream: '🍦',
   Cake: '🍰',
   Pizza: '🍕',
-  Soup: '🍲',
+  Soup: '🥢',
   Sandwich: '🥪',
   CupSoda: '🧋',
   Flame: '🔥',
@@ -63,6 +64,7 @@ function emojiForConfig(cfg: CategoryConfig): string {
     return EMOJI_BY_SUB_CATEGORY[cfg.sub_category];
   }
   const label = cfg.sub_label || '';
+  if (/小吃|老攤|滷味|牛肉湯|米糕|碗粿/.test(label)) return '🥢';
   if (/飲料|手搖|奶茶|茶飲|果汁/.test(label)) return '🧋';
   if (/咖啡|早午餐|下午茶/.test(label)) return '☕';
   if (/燒烤|燒肉|串燒|烤肉|居酒屋/.test(label)) return '🔥';
@@ -589,7 +591,7 @@ export function EatNowWidget({
       </div>
 
       {/* Unified Dining Category Pills (1:1 with 地點清單 categoryConfigs!) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
         {cravingOptions.map((opt) => {
           const isSelected = effectiveCraving === opt.id && isOpen;
           return (

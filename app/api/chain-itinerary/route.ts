@@ -64,7 +64,10 @@ function parseIntentSequenceFromText(
   const text = (promptText || '').trim();
 
   if (/之旅|一日遊|半日遊|安排|行程/.test(text)) {
-    const pinnedMeal = pinnedBySubCat.get('meal');
+    const wantsStreetFood = /小吃/.test(text);
+    const pinnedMeal = wantsStreetFood
+      ? pinnedBySubCat.get('street_food') || pinnedBySubCat.get('meal')
+      : pinnedBySubCat.get('meal') || pinnedBySubCat.get('street_food');
     const pinnedMuseum = pinnedBySubCat.get('museum');
     const pinnedSnack = pinnedBySubCat.get('snack_dessert');
     const pinnedSouvenir = pinnedBySubCat.get('souvenir');
@@ -82,10 +85,12 @@ function parseIntentSequenceFromText(
       {
         id: 'nlp-trip-2',
         label: pinnedMeal
-          ? `📌 指定中餐：${normalizeShortName(pinnedMeal.name)}`
-          : '餐廳：正餐',
+          ? `📌 指定用餐：${normalizeShortName(pinnedMeal.name)}`
+          : wantsStreetFood
+          ? '餐廳：在地小吃'
+          : '餐廳：正餐／在地小吃',
         primary_category: 'restaurant',
-        sub_category: 'meal',
+        sub_category: wantsStreetFood ? 'street_food' : 'meal',
         only_unvisited: false,
       },
       {
@@ -441,12 +446,15 @@ function buildPlanFromSelectedStops(params: {
         ? activeSelection[i + 1].place
         : endAnchor || null;
 
+    const isMainDiningSub = (s: string) => s === 'meal' || s === 'street_food';
     const alternatives = allNearbyCandidates
       .filter(
         (cand) =>
           cand.id !== place.id &&
           !usedIds.has(cand.id) &&
-          cand.sub_category === place.sub_category
+          (cand.sub_category === place.sub_category ||
+            (isMainDiningSub(cand.sub_category) &&
+              isMainDiningSub(place.sub_category)))
       )
       .map((cand) => {
         const dPrev = calculateDistanceMeters(
@@ -818,14 +826,27 @@ export async function POST(req: NextRequest) {
       const isLastStep = stepIdx === sequence.length - 1;
       const isSecondToLastStep = stepIdx === sequence.length - 2;
       const pinnedPlace = block.sub_category
-        ? pinnedBySubCat.get(block.sub_category)
+        ? pinnedBySubCat.get(block.sub_category) ||
+          (block.sub_category === 'meal'
+            ? pinnedBySubCat.get('street_food')
+            : undefined)
         : undefined;
 
       const nextBlock =
         stepIdx + 1 < sequence.length ? sequence[stepIdx + 1] : undefined;
       const nextPinned = nextBlock?.sub_category
-        ? pinnedBySubCat.get(nextBlock.sub_category)
+        ? pinnedBySubCat.get(nextBlock.sub_category) ||
+          (nextBlock.sub_category === 'meal'
+            ? pinnedBySubCat.get('street_food')
+            : undefined)
         : undefined;
+
+      const matchesBlockSubCat = (candSub: string, targetSub?: string) => {
+        if (!targetSub) return true;
+        if (candSub === targetSub) return true;
+        if (targetSub === 'meal' && candSub === 'street_food') return true;
+        return false;
+      };
 
       const nextBeam: PathNode[] = [];
 
@@ -839,7 +860,7 @@ export async function POST(req: NextRequest) {
         } else {
           pool = spatialCandidates.filter((cand) => {
             if (branch.usedIds.has(cand.id)) return false;
-            if (block.sub_category && cand.sub_category !== block.sub_category)
+            if (!matchesBlockSubCat(cand.sub_category, block.sub_category))
               return false;
             if (block.only_unvisited && cand.visit_status !== 'unvisited')
               return false;
@@ -849,7 +870,14 @@ export async function POST(req: NextRequest) {
             pool = spatialCandidates.filter(
               (cand) =>
                 !branch.usedIds.has(cand.id) &&
-                cand.sub_category === block.sub_category
+                matchesBlockSubCat(cand.sub_category, block.sub_category)
+            );
+          }
+          // If user specifically asked for street_food and none exist in radius, gracefully fall back to meal
+          if (pool.length === 0 && block.sub_category === 'street_food') {
+            pool = spatialCandidates.filter(
+              (cand) =>
+                !branch.usedIds.has(cand.id) && cand.sub_category === 'meal'
             );
           }
         }

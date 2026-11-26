@@ -1937,12 +1937,77 @@ export function inferPlaceCategoryByName(text: string): {
     };
   }
 
-  // 8. General Dining / Meals (Default fallback for all eateries, Western/French/Japanese cuisine like Mon Poulet, roast chicken, noodles, etc.)
+  // 8. Taiwanese Local Street Food / Savory Snacks (在地小吃)
+  if (isTaiwaneseStreetFood(text)) {
+    return {
+      primary_category: 'restaurant',
+      sub_category: 'street_food',
+      estimated_stay_mins: 40,
+    };
+  }
+
+  // 9. General Dining / Sit-down Meals (Default fallback for restaurants, hotpot, steak, Western/French/Japanese cuisine, etc.)
   return {
     primary_category: 'restaurant',
     sub_category: 'meal',
     estimated_stay_mins: 80,
   };
+}
+
+const NON_FOOD_LANDMARK_OR_MARKET_REGEX =
+  /漁港|魚市|老街|夜市|市場|市集|碼頭|公園|古堡|樹屋|文創|藝術|博物館|美術館|紀念館|故事館|百貨|商場|購物中心|書院|教堂|天后宮|廟|寺|神社|步道|觀景/i;
+
+const SIT_DOWN_RESTAURANT_NAME_REGEX =
+  /鼎泰豐|餐廳|大飯店|飯店|酒店|會館|餐館|食堂|小館|料理|私廚|無菜單|吃到飽|百匯|buffet|火鍋|麻辣鍋|涮涮鍋|石頭鍋|壽喜燒|燒肉|烤肉|牛排|排餐|鐵板燒|義大利麵|義式|法式|美式|泰式|越式|印式|韓式|港式|茶餐廳|港點|飲茶|拉麵|烏龍麵|蕎麥麵|居酒屋|壽司|生魚片|刺身|丼飯|咖哩|早午餐|brunch|披薩|pizza|漢堡|burger|熱炒|海產店|梅鑫海產|海鮮餐廳|甕仔雞|桶仔雞|土雞城|燻羊肉|合菜|桌菜|素食餐廳|蔬食餐廳|bistro|mon\s*poulet/i;
+
+const SWEET_CAFE_OR_BAR_NAME_REGEX =
+  /咖啡|甜點|下午茶|布丁|豆花|蛋糕|烘焙|泡芙|鬆餅|奶茶|紅茶|綠茶|烏龍|手搖|茶飲|果汁|木瓜牛奶|刨冰|剉冰|雪花冰|冰淇淋|冰店|冰品|甜品|圓仔冰|甜湯|雞蛋糕|車輪餅|紅豆餅|甜甜圈|可麗餅|白糖粿|和菓子|洋菓子|伴手禮|名產|餅店|餅家|糕餅|煎餅|地瓜酥|餐酒|酒吧|\bbar\b|精釀|調酒|茶室|茶館/i;
+
+const TAIWAN_STREET_FOOD_NAME_REGEX =
+  /小吃|老攤|攤販|路邊攤|麵攤|麵店|無名麵|堀江麵|九重葛|興隆居|阜杭豆漿|富盛號|醇涎坊|集品蝦仁飯|矮仔成|六千泓佐|六千牛肉|阿堂鹹粥|阿松割包|鴨肉珍|鴨肉本|下林米糕|牛肉湯|羊肉湯|魚湯|鮮魚湯|虱目魚|土魠魚|𩵚魠魚|小卷米粉|鹹粥|海產粥|廣東粥|肉粥|香菇肉羹|肉羹|肉焿|鴨肉羹|鴨肉焿|魷魚羹|魷魚焿|浮水魚羹|花枝羹|生炒花枝|鱔魚|豬心冬粉|豬心|當歸鴨|下水湯|四神湯|排骨酥|滷肉飯|魯肉飯|肉燥飯|火雞肉飯|雞肉飯|鴨肉飯|蝦仁飯|豬腳飯|控肉飯|爌肉飯|筒仔米糕|米糕|碗粿|肉粿|米粿|菜粽|肉粽|燒肉粽|油飯|飯糰|刈包|割包|潤餅|春捲|擔仔麵|意麵|鍋燒|陽春麵|切仔麵|乾麵|麻醬麵|涼麵|傻瓜乾麵|牛肉麵|牛肉拌麵|米苔目|米粉湯|炒米粉|米粉炒|粄條|粿條|鼎邊趖|餛飩|扁食|水餃|鍋貼|煎餃|小籠湯包|小籠包|湯包|生煎包|水煎包|蒸餃|肉包|包子|饅頭|燒餅|油條|永和豆漿|豆漿店|蛋餅|蔥油餅|蔥抓餅|韭菜盒|餡餅|胡椒餅|肉圓|肉丸|臭豆腐|蚵仔(?!寮)|蝦仁煎|蚵爹|炸粿|甜不辣|黑輪|關東煮|大腸包小腸|大腸麵線|麵線糊|麵線|香腸熟肉|黑白切|魯味|滷味|鹽酥雞|鹹酥雞|雞排|地瓜球|章魚燒|烤玉米|豬血糕|米血/i;
+
+/**
+ * Accurately distinguishes Taiwanese local savory street food / quick eateries (在地小吃)
+ * from sit-down restaurants (正餐), cafes/desserts (點心／下午茶), and non-food places.
+ */
+export function isTaiwaneseStreetFood(
+  name: string,
+  googleTypeLabel = '',
+  customTags: string[] = []
+): boolean {
+  const cleanName = (name || '').trim();
+  if (!cleanName) return false;
+
+  if (NON_FOOD_LANDMARK_OR_MARKET_REGEX.test(cleanName)) return false;
+  if (SWEET_CAFE_OR_BAR_NAME_REGEX.test(cleanName)) return false;
+  if (
+    SIT_DOWN_RESTAURANT_NAME_REGEX.test(cleanName) &&
+    !/小吃/.test(cleanName)
+  ) {
+    return false;
+  }
+
+  if (TAIWAN_STREET_FOOD_NAME_REGEX.test(cleanName)) {
+    return true;
+  }
+
+  const label = (googleTypeLabel || '').trim();
+  if (
+    label &&
+    /小吃店|熟食店|麵店|粥品|餃子|滷味|攤販/.test(label) &&
+    !SIT_DOWN_RESTAURANT_NAME_REGEX.test(label)
+  ) {
+    return true;
+  }
+
+  if (
+    Array.isArray(customTags) &&
+    customTags.some((t) => /小吃|銅板美食|路邊攤|老攤/.test(t))
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

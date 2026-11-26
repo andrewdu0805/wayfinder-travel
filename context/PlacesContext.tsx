@@ -26,6 +26,7 @@ import {
   extractRegionFromAddress,
   getCoordinatesForRegion,
   inferPlaceCategoryByName,
+  isTaiwaneseStreetFood,
   separateNameAndAddress,
 } from '@/lib/geo-utils';
 import { resolvePlaceDescription } from '@/lib/place-notes';
@@ -41,6 +42,7 @@ const STORAGE_KEYS = {
   LAST_SYNCED_AT: 'antigravity_last_synced_at_v1',
   HAS_SYNCED_ONCE: 'antigravity_has_synced_once_v1',
   HAS_LOCAL_MUTATION: 'antigravity_has_local_mutation_v1',
+  STREET_FOOD_MIGRATED: 'antigravity_street_food_migrated_v1',
 };
 
 const DEFAULT_PLACE_MAP = new Map<string, SavedPlace>(
@@ -255,6 +257,7 @@ interface PlacesContextValue {
   updateSettings: (patch: Partial<AppSettings>) => void;
   importSettingsCode: (codeOrUrl: string) => boolean;
   refreshPlacesHours: (targetPlaces: SavedPlace[]) => Promise<number>;
+  reclassifyStreetFoodFromMeals: () => number;
   syncWithSupabase: () => Promise<{ ok: boolean; message: string }>;
   resetToDemoData: () => void;
 }
@@ -494,10 +497,14 @@ export function sanitizePlaceRecord(p: SavedPlace): SavedPlace {
     }
   }
 
-  // B. If a culture/landmark/bar place was defaulted to 'restaurant / meal':
+  // B. If a culture/landmark/bar/dessert place was defaulted to 'restaurant / meal':
+  // (Note: 'street_food' split is handled via versioned migration / manual rescan so user's manual 'meal' choice is preserved!)
   if (nextPrimary === 'restaurant' && nextSub === 'meal') {
     const inferredCat = inferPlaceCategoryByName(nextName);
-    if (inferredCat.sub_category !== 'meal') {
+    if (
+      inferredCat.sub_category !== 'meal' &&
+      inferredCat.sub_category !== 'street_food'
+    ) {
       nextPrimary = inferredCat.primary_category;
       nextSub = inferredCat.sub_category;
       nextStay = inferredCat.estimated_stay_mins;
@@ -669,35 +676,6 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
   // Hydrate from localStorage on client mount
   useEffect(() => {
     try {
-      const rawPlaces = localStorage.getItem(STORAGE_KEYS.PLACES);
-      if (rawPlaces !== null) {
-        const parsed = JSON.parse(rawPlaces);
-        if (Array.isArray(parsed)) {
-          const sanitized = parsed.map(sanitizePlaceRecord);
-          setPlaces(sanitized);
-          placesRef.current = sanitized;
-        }
-      }
-      const rawCats = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
-      if (rawCats !== null) {
-        const parsedCats = JSON.parse(rawCats);
-        if (Array.isArray(parsedCats) && parsedCats.length > 0) {
-          const existingSubs = new Set(
-            parsedCats.map((c: CategoryConfig) => c.sub_category)
-          );
-          const mergedCats = [...parsedCats];
-          for (const defCfg of DEFAULT_CATEGORY_CONFIGS) {
-            if (!existingSubs.has(defCfg.sub_category)) {
-              mergedCats.push(defCfg);
-            }
-          }
-          mergedCats.sort(
-            (a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99)
-          );
-          setCategoryConfigs(mergedCats);
-          categoryConfigsRef.current = mergedCats;
-        }
-      }
       const rawDeletedPlaces = localStorage.getItem(
         STORAGE_KEYS.DELETED_PLACES
       );
@@ -716,16 +694,42 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           deletedCategorySubsRef.current = new Set(parsedDelCats.map(String));
         }
       }
-      const storedLastSyncedAt = localStorage.getItem(
-        STORAGE_KEYS.LAST_SYNCED_AT
-      );
-      if (storedLastSyncedAt) {
-        setLastSyncedAt(storedLastSyncedAt);
+
+      let hydratedCats = DEFAULT_CATEGORY_CONFIGS;
+      const rawCats = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+      if (rawCats !== null) {
+        const parsedCats = JSON.parse(rawCats);
+        if (Array.isArray(parsedCats) && parsedCats.length > 0) {
+          const existingSubs = new Set(
+            parsedCats.map((c: CategoryConfig) => c.sub_category)
+          );
+          const mergedCats = [...parsedCats];
+          for (const defCfg of DEFAULT_CATEGORY_CONFIGS) {
+            if (
+              !existingSubs.has(defCfg.sub_category) &&
+              !deletedCategorySubsRef.current.has(defCfg.sub_category)
+            ) {
+              mergedCats.push(defCfg);
+            }
+          }
+          mergedCats.sort(
+            (a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99)
+          );
+          hydratedCats = mergedCats;
+          setCategoryConfigs(mergedCats);
+          categoryConfigsRef.current = mergedCats;
+        }
       }
 
       const rawSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+      let hydratedSbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      let hydratedSbKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
       if (rawSettings) {
         const parsedSettings = JSON.parse(rawSettings);
+        hydratedSbUrl =
+          parsedSettings.supabaseUrl?.trim() || hydratedSbUrl || '';
+        hydratedSbKey =
+          parsedSettings.supabaseAnonKey?.trim() || hydratedSbKey || '';
         setSettings((prev) => {
           const nextSettings = {
             ...prev,
@@ -754,6 +758,50 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
           settingsRef.current = nextSettings;
           return nextSettings;
         });
+      }
+
+      const rawPlaces = localStorage.getItem(STORAGE_KEYS.PLACES);
+      if (rawPlaces !== null) {
+        const parsed = JSON.parse(rawPlaces);
+        if (Array.isArray(parsed)) {
+          let sanitized: SavedPlace[] = parsed.map(sanitizePlaceRecord);
+          const hasSb =
+            Boolean(normalizeSupabaseUrl(hydratedSbUrl)) &&
+            Boolean(cleanApiKey(hydratedSbKey));
+          // If Supabase is NOT configured, run one-time local street_food split here;
+          // If Supabase IS configured, syncWithSupabase runs it right after pulling remote so cloud gets updated too!
+          if (
+            !hasSb &&
+            localStorage.getItem(STORAGE_KEYS.STREET_FOOD_MIGRATED) !== '1'
+          ) {
+            const streetStay =
+              hydratedCats.find((c) => c.sub_category === 'street_food')
+                ?.default_stay_mins ?? 40;
+            const migIso = new Date().toISOString();
+            sanitized = sanitized.map((p) =>
+              p.primary_category === 'restaurant' &&
+              p.sub_category === 'meal' &&
+              isTaiwaneseStreetFood(p.name, '', p.custom_tags)
+                ? {
+                    ...p,
+                    sub_category: 'street_food',
+                    estimated_stay_mins: streetStay,
+                    updated_at: migIso,
+                  }
+                : p
+            );
+            localStorage.setItem(STORAGE_KEYS.STREET_FOOD_MIGRATED, '1');
+          }
+          setPlaces(sanitized);
+          placesRef.current = sanitized;
+        }
+      }
+
+      const storedLastSyncedAt = localStorage.getItem(
+        STORAGE_KEYS.LAST_SYNCED_AT
+      );
+      if (storedLastSyncedAt) {
+        setLastSyncedAt(storedLastSyncedAt);
       }
 
       // Check for sync_keys in URL (e.g. from scanning PC QR code)
@@ -1518,6 +1566,53 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
         placesToPushMap.set(key, local);
       }
 
+      // 3c. One-time auto-split of Taiwanese street food (在地小吃) from generic 'meal' (正餐)
+      let streetFoodMigratedAlready = false;
+      try {
+        streetFoodMigratedAlready =
+          localStorage.getItem(STORAGE_KEYS.STREET_FOOD_MIGRATED) === '1';
+      } catch {}
+      if (!streetFoodMigratedAlready) {
+        const cloudAlreadyHasStreetFood = remotePlaces.some(
+          (rp) =>
+            rp.sub_category === 'street_food' && !isUnmodifiedDefaultPlace(rp)
+        );
+        if (!cloudAlreadyHasStreetFood) {
+          const streetFoodStay =
+            categoryConfigsRef.current.find(
+              (c) => c.sub_category === 'street_food'
+            )?.default_stay_mins ?? 40;
+          const migrationIso = new Date().toISOString();
+          for (const [key, mp] of Array.from(mergedPlacesMap.entries())) {
+            if (
+              mp.primary_category === 'restaurant' &&
+              mp.sub_category === 'meal' &&
+              isTaiwaneseStreetFood(mp.name, '', mp.custom_tags)
+            ) {
+              const reclassified: SavedPlace = {
+                ...mp,
+                sub_category: 'street_food',
+                estimated_stay_mins: streetFoodStay,
+                updated_at: migrationIso,
+              };
+              mergedPlacesMap.set(key, reclassified);
+              if (
+                !(
+                  !hasSyncedOnce &&
+                  remotePlaces.length === 0 &&
+                  isUnmodifiedDefaultPlace(mp)
+                )
+              ) {
+                placesToPushMap.set(key, reclassified);
+              }
+            }
+          }
+        }
+        try {
+          localStorage.setItem(STORAGE_KEYS.STREET_FOOD_MIGRATED, '1');
+        } catch {}
+      }
+
       // Step 4: Batch upsert new/updated places to Supabase
       const placesToPush = Array.from(placesToPushMap.values());
       const UPSERT_BATCH = 50;
@@ -1542,6 +1637,14 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       const localCatBySub = new Map<string, CategoryConfig>();
       for (const lc of localCategories) {
         localCatBySub.set(lc.sub_category, lc);
+      }
+      for (const defCfg of DEFAULT_CATEGORY_CONFIGS) {
+        if (
+          !localCatBySub.has(defCfg.sub_category) &&
+          !deletedCategorySubsRef.current.has(defCfg.sub_category)
+        ) {
+          localCatBySub.set(defCfg.sub_category, defCfg);
+        }
       }
 
       const mergedCatsMap = new Map<string, CategoryConfig>();
@@ -1568,8 +1671,10 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
 
       for (const [sub, lc] of localCatBySub.entries()) {
         if (remoteCatBySub.has(sub)) continue;
+        if (deletedCategorySubsRef.current.has(sub)) continue;
         mergedCatsMap.set(sub, lc);
         if (
+          sub === 'street_food' ||
           !(!hasSyncedOnce && remoteCategories.length > 0 && isUnmodifiedDefaultCategory(lc))
         ) {
           catsToPush.push(lc);
@@ -1997,6 +2102,58 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
+  const reclassifyStreetFoodFromMeals = useCallback((): number => {
+    const nowIso = new Date().toISOString();
+    const defaultStreetCfg = DEFAULT_CATEGORY_CONFIGS.find(
+      (c) => c.sub_category === 'street_food'
+    );
+    let activeStreetStay = 40;
+    const existingStreetCfg = categoryConfigsRef.current.find(
+      (c) => c.sub_category === 'street_food'
+    );
+    if (existingStreetCfg) {
+      activeStreetStay = existingStreetCfg.default_stay_mins || 40;
+    } else if (defaultStreetCfg) {
+      deletedCategorySubsRef.current.delete('street_food');
+      persistDeletedQueues();
+      const nextCats = [
+        ...categoryConfigsRef.current,
+        { ...defaultStreetCfg, updated_at: nowIso },
+      ].sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99));
+      categoryConfigsRef.current = nextCats;
+      setCategoryConfigs(nextCats);
+    }
+
+    let count = 0;
+    const nextPlaces = placesRef.current.map((p) => {
+      if (
+        p.primary_category === 'restaurant' &&
+        p.sub_category === 'meal' &&
+        isTaiwaneseStreetFood(p.name, '', p.custom_tags)
+      ) {
+        count += 1;
+        return {
+          ...p,
+          sub_category: 'street_food',
+          estimated_stay_mins: activeStreetStay,
+          updated_at: nowIso,
+        };
+      }
+      return p;
+    });
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.STREET_FOOD_MIGRATED, '1');
+    } catch {}
+
+    if (count > 0) {
+      placesRef.current = nextPlaces;
+      setPlaces(nextPlaces);
+      scheduleAutoPush();
+    }
+    return count;
+  }, [persistDeletedQueues, scheduleAutoPush]);
+
   const value = useMemo(
     () => ({
       places,
@@ -2025,6 +2182,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       updateSettings,
       importSettingsCode,
       refreshPlacesHours,
+      reclassifyStreetFoodFromMeals,
       syncWithSupabase,
       resetToDemoData,
     }),
@@ -2055,6 +2213,7 @@ export function PlacesProvider({ children }: { children: React.ReactNode }) {
       updateSettings,
       importSettingsCode,
       refreshPlacesHours,
+      reclassifyStreetFoodFromMeals,
       syncWithSupabase,
       resetToDemoData,
     ]

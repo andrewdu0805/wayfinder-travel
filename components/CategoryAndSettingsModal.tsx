@@ -52,6 +52,7 @@ export function CategoryAndSettingsModal({
     updateSettings,
     importSettingsCode,
     importPlacesFromJson,
+    reclassifyStreetFoodFromMeals,
     syncWithSupabase,
     resetToDemoData,
   } = usePlaces();
@@ -65,6 +66,9 @@ export function CategoryAndSettingsModal({
   const [newStayMins, setNewStayMins] = useState(60);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [syncFeedbackIsError, setSyncFeedbackIsError] = useState(false);
+  const [streetFoodFeedback, setStreetFoodFeedback] = useState<string | null>(
+    null
+  );
 
   // Cross-device sync state
   const [showQrModal, setShowQrModal] = useState(false);
@@ -262,13 +266,40 @@ export function CategoryAndSettingsModal({
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
           {activeTab === 'categories' ? (
             <>
-              <div className="rounded-2xl border-2 border-amber-300 bg-amber-50/70 p-4 text-sm sm:text-base text-stone-800 leading-relaxed">
-                <p className="font-black text-amber-950 text-base sm:text-lg mb-1">
-                  💡 免改資料庫的彈性分類系統
-                </p>
-                <p className="text-stone-700">
-                  您可以自由新增任何子分類（例如：「宵夜／酒吧」、「神社寺廟」、「不限時咖啡」）或調整預設停留分鐘數，所有地點卡片與排程會立即同步！
-                </p>
+              <div className="rounded-2xl border-2 border-amber-300 bg-amber-50/70 p-4 text-sm sm:text-base text-stone-800 leading-relaxed space-y-3">
+                <div>
+                  <p className="font-black text-amber-950 text-base sm:text-lg mb-1">
+                    💡 免改資料庫的彈性分類系統
+                  </p>
+                  <p className="text-stone-700">
+                    您可以自由新增任何子分類（例如：「宵夜／酒吧」、「神社寺廟」、「不限時咖啡」）或調整預設停留分鐘數，「地點清單」與「現在想吃什麼」會立即同步！
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-200/80">
+                  <span className="text-xs sm:text-sm font-bold text-amber-900">
+                    🥢 可免消耗 API 額度，直接將現有「正餐」中的牛肉湯、米糕、碗粿、麵攤等自動分流至「在地小吃」：
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const moved = reclassifyStreetFoodFromMeals();
+                      setStreetFoodFeedback(
+                        moved > 0
+                          ? `✅ 已將 ${moved} 間店家從「正餐」歸類為「在地小吃」（並自動同步雲端）！`
+                          : '✅ 目前「正餐」中已無待分流的在地小吃店家'
+                      );
+                    }}
+                    className="rounded-xl bg-teal-600 px-3.5 py-2 text-xs sm:text-sm font-extrabold text-white hover:bg-teal-700 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    🥢 重新掃描分出「在地小吃」
+                  </button>
+                </div>
+                {streetFoodFeedback && (
+                  <p className="text-xs sm:text-sm font-extrabold text-teal-800">
+                    {streetFoodFeedback}
+                  </p>
+                )}
               </div>
 
               {/* Add New Category Form */}
