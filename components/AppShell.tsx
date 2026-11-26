@@ -244,7 +244,9 @@ export function AppShell({ initialTab = 'places' }: AppShellProps) {
             onOpenSettingsModal={() => openSettings('categories')}
           />
         ) : (
-          <ItineraryPlannerView />
+          <ItineraryPlannerView
+            onOpenSettingsModal={() => openSettings('categories')}
+          />
         )}
       </main>
 

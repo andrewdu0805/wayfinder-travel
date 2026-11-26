@@ -93,7 +93,13 @@ function shortAnchorName(a: TripAnchor | null | undefined): string {
   return a.name;
 }
 
-export function ItineraryPlannerView() {
+interface ItineraryPlannerViewProps {
+  onOpenSettingsModal?: () => void;
+}
+
+export function ItineraryPlannerView({
+  onOpenSettingsModal,
+}: ItineraryPlannerViewProps = {}) {
   const { places, updatePlaceInline, categoryConfigs, settings } = usePlaces();
 
   const [trip, setTrip] = useState<TripState>(() => createDefaultTrip());
@@ -826,7 +832,9 @@ export function ItineraryPlannerView() {
       <EatNowWidget
         defaultCity={dest.city}
         defaultDistrict={dest.district}
+        activeDayOfWeek={activeDay?.dayOfWeek}
         onAddPlaceToItinerary={handleAddEatNowPlace}
+        onOpenSettingsModal={onOpenSettingsModal}
       />
 
       {/* ==================== 對話窗 ＋ 旅程設定 ==================== */}
